@@ -81,4 +81,4 @@ class QWebChannelProtocol(QWebChannel):
     def send(self, data):
         if not isinstance(data, str):
             data = json.dumps(data)
-            self.transport.write((data + '\n').encode('utf-8'))
+        self.transport.write((data + '\n').encode('utf-8'))
