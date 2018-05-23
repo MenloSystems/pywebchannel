@@ -9,7 +9,7 @@ setuptools.setup(
     version=pywebchannel.__version__,
     author=pywebchannel.__author__,
     author_email=pywebchannel.__email__,
-    description="An implementation of Qt's WebChannel protocol",
+    description="An implementation of Qt's WebChannel protocol in pure Python",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/menlosystems/pywebchannel",
