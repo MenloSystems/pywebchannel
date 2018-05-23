@@ -97,7 +97,7 @@ class QWebChannel(object):
     def handleSignal(self, message):
         object = self.objects[message["object"]];
         if (object):
-            object._signalEmitted(message["signal"], message["args"]);
+            object._signalEmitted(message["signal"], message.get("args", []));
         else:
             print("Unhandled signal: " + str(message["object"]) + "::" + str(message["signal"]))
 
