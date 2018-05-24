@@ -2,7 +2,7 @@
 
 ## What is PyWebChannel?
 
-PyWebChannel is an impementation of [Qt's WebChannel](https://doc.qt.io/qt-5/qtwebchannel-index.html) protocol in Python.
+PyWebChannel is an implementation of [Qt's WebChannel](https://doc.qt.io/qt-5/qtwebchannel-index.html) protocol in Python.
 
 The basic module only depends on nothing but Python's [Enum module](https://docs.python.org/3/library/enum.html).
 In Python < 3.4 you need the backport `enum34` module.
