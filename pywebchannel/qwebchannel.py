@@ -221,7 +221,7 @@ class QObject(object):
         # update property cache
         for propertyIndex in propertyMap:
             propertyValue = propertyMap[propertyIndex]
-            self._propertyCache[propertyIndex] = propertyValue
+            self._propertyCache[int(propertyIndex)] = propertyValue
 
         for signalName in signals:
             # Invoke all callbacks, as _signalEmitted() does not. This ensures the
@@ -262,6 +262,7 @@ class QObject(object):
 
     def _bindGetterSetter(self, propertyInfo):
         propertyIndex, propertyName, notifySignalData, propertyValue = propertyInfo
+        propertyIndex = int(propertyIndex)
 
         # initialize property cache with current value
         # NOTE: if this is an object, it is not directly unwrapped as it might
