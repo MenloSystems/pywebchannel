@@ -29,10 +29,12 @@ class QWebChannel(object):
 
     def __init__(self, initCallback=None):
         self.initCallback = initCallback
+        self.__initialized = False
 
     def initialized(self):
         if (self.initCallback):
             self.initCallback(self)
+        self.__initialized = True
 
     def connection_made(self, transport):
         self.transport = transport
@@ -60,10 +62,15 @@ class QWebChannel(object):
         if isinstance(data, str):
             data = json.loads(data)
 
+        if data["type"] == QWebChannelMessageTypes.response:
+            self.handleResponse(data);
+            return
+
+        if not self.__initialized:
+            return  # All objects have to be created first!
+
         if data["type"] == QWebChannelMessageTypes.signal:
             self.handleSignal(data);
-        elif data["type"] == QWebChannelMessageTypes.response:
-            self.handleResponse(data);
         elif data["type"] == QWebChannelMessageTypes.propertyUpdate:
             self.handle_propertyUpdate(data);
         else:
@@ -95,8 +102,8 @@ class QWebChannel(object):
     objects = {}
 
     def handleSignal(self, message):
-        object = self.objects[message["object"]];
-        if (object):
+        object = self.objects.get(message["object"], None);
+        if object is not None:
             object._signalEmitted(message["signal"], message.get("args", []));
         else:
             print("Unhandled signal: " + str(message["object"]) + "::" + str(message["signal"]))
@@ -111,8 +118,8 @@ class QWebChannel(object):
 
     def handle_propertyUpdate(self, message):
         for data in message["data"]:
-            qObject = self.objects[data["object"]];
-            if qObject:
+            qObject = self.objects.get(data["object"], None);
+            if qObject is not None:
                 qObject._propertyUpdate(data["signals"], data["properties"]);
             else:
                 print("Unhandled property update: " + data["object"] + "::" + data["signal"])

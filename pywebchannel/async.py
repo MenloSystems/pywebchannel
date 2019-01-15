@@ -48,9 +48,8 @@ class QWebChannel(PlainQWebChannel):
         return self.__initialized_future.__await__()
 
     def initialized(self):
+        super().initialized()
         self._loop.call_soon_threadsafe(self.__initialized_future.set_result, None)
-        if (self.initCallback):
-            self.initCallback(self)
 
 
 class QWebChannelProtocol(QWebChannel):
