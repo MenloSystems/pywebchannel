@@ -122,7 +122,7 @@ class QWebChannel(object):
             if qObject is not None:
                 qObject._propertyUpdate(data["signals"], data["properties"]);
             else:
-                print("Unhandled property update: " + str(data.get("object")) + "::" + str(data.get("signal")))
+                print("Unhandled property update for " + str(data.get("object")))
         self.exec_({"type": QWebChannelMessageTypes.idle});
 
     def debug(self, message):
