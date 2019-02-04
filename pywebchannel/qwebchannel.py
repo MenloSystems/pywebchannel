@@ -106,7 +106,7 @@ class QWebChannel(object):
         if object is not None:
             object._signalEmitted(message["signal"], message.get("args", []));
         else:
-            print("Unhandled signal: " + str(message["object"]) + "::" + str(message["signal"]))
+            print("Unhandled signal: " + str(message.get("object")) + "::" + str(message.get("signal")))
 
     def handleResponse(self, message):
         if "id" not in message:
@@ -122,7 +122,7 @@ class QWebChannel(object):
             if qObject is not None:
                 qObject._propertyUpdate(data["signals"], data["properties"]);
             else:
-                print("Unhandled property update: " + data["object"] + "::" + data["signal"])
+                print("Unhandled property update: " + str(data.get("object")) + "::" + str(data.get("signal")))
         self.exec_({"type": QWebChannelMessageTypes.idle});
 
     def debug(self, message):
