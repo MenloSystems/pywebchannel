@@ -166,7 +166,7 @@ class QObject(object):
 
         if (not isinstance(response, dict)
                 or "__QObject*__" not in response
-                or "id" not in response["id"]):
+                or "id" not in response):
             return response;
 
         objectId = response["id"];
@@ -248,6 +248,8 @@ class QObject(object):
             for arg in arguments:
                 if callable(arg):
                     callback = arg
+                elif isinstance(arg, QObject) and arg._id in self._webChannel.objects:
+                    args.append({ "id": arg._id })
                 else:
                     args.append(arg)
 
@@ -296,11 +298,16 @@ class QObject(object):
                 return
 
             self._propertyCache[propertyIndex] = value;
+
+            valueToSend = value
+            if isinstance(value, QObject) and value._id in self._webChannel.objects:
+                valueToSend = { "id": value._id }
+
             self._webChannel.exec_({
                 "type": QWebChannelMessageTypes.setProperty,
                 "object": self._id,
                 "property": propertyIndex,
-                "value": value
+                "value": valueToSend
             });
 
         setattr(self.__class__, propertyName, property(getter, setter))
