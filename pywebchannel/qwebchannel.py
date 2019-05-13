@@ -44,7 +44,7 @@ class QWebChannel(object):
                 self.QObjectType(objectName, data[objectName], self);
 
             # now unwrap properties, which might reference other registered objects
-            for objectName in self.objects:
+            for objectName in self.objects.copy():
                 self.objects[objectName]._unwrapProperties();
 
             self.initialized()
