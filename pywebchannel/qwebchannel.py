@@ -32,9 +32,9 @@ class QWebChannel(object):
         self.__initialized = False
 
     def initialized(self):
+        self.__initialized = True
         if (self.initCallback):
             self.initCallback(self)
-        self.__initialized = True
 
     def connection_made(self, transport):
         self.transport = transport
@@ -49,9 +49,13 @@ class QWebChannel(object):
 
             self.initialized()
 
-            self.exec_({"type": QWebChannelMessageTypes.idle});
+            if self.__initialized:
+                self.exec_({"type": QWebChannelMessageTypes.idle});
 
         self.exec_({"type": QWebChannelMessageTypes.init}, callback)
+
+    def connection_closed(self):
+        self.__initialized = False
 
     def send(self, data):
         if not isinstance(data, str):
@@ -123,7 +127,8 @@ class QWebChannel(object):
                 qObject._propertyUpdate(data["signals"], data["properties"]);
             else:
                 print("Unhandled property update for " + str(data.get("object")))
-        self.exec_({"type": QWebChannelMessageTypes.idle});
+        if self.__initialized:
+            self.exec_({"type": QWebChannelMessageTypes.idle});
 
     def debug(self, message):
         self.send({"type": QWebChannelMessageTypes.debug, "data": message});
