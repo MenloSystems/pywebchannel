@@ -235,7 +235,7 @@ class QObject(object):
         # update property cache
         for propertyIndex in propertyMap:
             propertyValue = propertyMap[propertyIndex]
-            self._propertyCache[int(propertyIndex)] = propertyValue
+            self._propertyCache[int(propertyIndex)] = self._unwrapQObject(propertyValue)
 
         for signalName in signals:
             # Invoke all callbacks, as _signalEmitted() does not. This ensures the
