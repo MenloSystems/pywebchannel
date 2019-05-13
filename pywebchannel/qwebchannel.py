@@ -169,10 +169,12 @@ class QObject(object):
             # support list of objects
             return [ self._unwrapQObject(object) for object in response ]
 
-        if (not isinstance(response, dict)
-                or "__QObject*__" not in response
-                or "id" not in response):
-            return response;
+        if not isinstance(response, dict):
+            return response
+        else:
+            # Support QObjects as values in a map
+            if "__QObject*__" not in response or "id" not in response:
+                return { k: self._unwrapQObject(v) for k, v in response.items() }
 
         objectId = response["id"];
         if objectId in self._webChannel.objects:
