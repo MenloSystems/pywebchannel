@@ -9,16 +9,12 @@ import json
 
 class QObject(PlainQObject):
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def _addMethod(self, methodData):
+        super()._addMethod(methodData)
 
-        for n, v in inspect.getmembers(self):
-            if not hasattr(v, 'isQtMethod') or not v.isQtMethod:
-                continue
+        methodName = methodData[0];
+        method = getattr(self, methodName)
 
-            self._overrideMethodWithAsyncVersion(n, v)
-
-    def _overrideMethodWithAsyncVersion(self, name, method):
         def amethod(*args):
             fut = self._webChannel._loop.create_future()
 
@@ -28,7 +24,7 @@ class QObject(PlainQObject):
             method(*args, handleResponse)
             return fut
 
-        setattr(self, name, amethod)
+        setattr(self, methodName, amethod)
 
 
 class QWebChannel(PlainQWebChannel):

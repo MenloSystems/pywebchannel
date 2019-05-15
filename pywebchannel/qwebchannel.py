@@ -184,7 +184,7 @@ class QObject(object):
             print("Cannot unwrap unknown QObject " + objectId + " without data.")
             return
 
-        qObject = QObject( objectId, response["data"], self._webChannel )
+        qObject = type(self)( objectId, response["data"], self._webChannel )
 
         def destroyedFunction():
             if self._webChannel.objects[objectId] == qObject:
