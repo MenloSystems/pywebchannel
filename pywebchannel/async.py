@@ -24,6 +24,7 @@ class QObject(PlainQObject):
             method(*args, handleResponse)
             return fut
 
+        setattr(amethod, 'isQtMethod', True)
         setattr(self, methodName, amethod)
 
 
