@@ -5,6 +5,7 @@ from __future__ import absolute_import, division, print_function
 import json
 import sys
 import enum
+import inspect
 
 
 class QWebChannelMessageTypes(enum.IntEnum):
@@ -144,6 +145,7 @@ class QObject(object):
         # override the class so that we can dynamically add properties
         cls = self.__class__
         self.__class__ = type(cls.__name__ + '-' + name, (cls,), {})
+        self.__class__.__doc__ = "Interface for remote object {0}".format(name)
 
         # List of callbacks that get invoked upon signal emission
         self._objectSignals = {};
@@ -161,7 +163,17 @@ class QObject(object):
             self._addSignal(signal, False)
 
         for name, values in data.get("enums", {}).items():
-            setattr(self, name, enum.IntEnum(name, values))
+            setattr(self.__class__, name, enum.IntEnum(name, values))
+
+
+    def __dir__(self):
+        def keep(member):
+            obj = inspect.getattr_static(self, member)
+            return (((hasattr(obj, 'isQtMethod') or isinstance(obj, Signal))
+                     and '(' not in member) or isinstance(obj, property)
+                     or issubclass(type(obj), enum.EnumMeta))
+
+        return [ x for x in super().__dir__() if keep(x) ]
 
 
     def _unwrapQObject(self, response):
@@ -216,7 +228,9 @@ class QObject(object):
         signalName = signalData[0];
         signalIndex = signalData[1];
 
-        setattr(self, signalName, Signal(self, signalIndex, signalName, isPropertyNotifySignal))
+        sigInstance = Signal(self, signalIndex, signalName, isPropertyNotifySignal)
+
+        setattr(self.__class__, signalName, sigInstance)
 
     def _invokeSignalCallbacks(self, signalName, signalArgs):
         """Invokes all callbacks for the given signalname. Also works for property notify callbacks."""
@@ -249,7 +263,7 @@ class QObject(object):
         methodName = methodData[0];
         methodIdx = methodData[1];
 
-        def method(*arguments):
+        def method(self, *arguments):
             args = []
             callback = None
             for arg in arguments:
@@ -274,7 +288,7 @@ class QObject(object):
 
         method.isQtMethod = True
 
-        setattr(self, methodName, method)
+        setattr(self.__class__, methodName, method)
 
     def _bindGetterSetter(self, propertyInfo):
         propertyIndex, propertyName, notifySignalData, propertyValue = propertyInfo
