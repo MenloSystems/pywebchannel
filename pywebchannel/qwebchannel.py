@@ -143,7 +143,7 @@ class QObject(object):
 
         # override the class so that we can dynamically add properties
         cls = self.__class__
-        self.__class__ = type(cls.__name__, (cls,), {})
+        self.__class__ = type(cls.__name__ + '-' + name, (cls,), {})
 
         # List of callbacks that get invoked upon signal emission
         self._objectSignals = {};
@@ -184,7 +184,7 @@ class QObject(object):
             print("Cannot unwrap unknown QObject " + objectId + " without data.")
             return
 
-        qObject = type(self)( objectId, response["data"], self._webChannel )
+        qObject = self._webChannel.QObjectType(objectId, response["data"], self._webChannel)
 
         def destroyedFunction():
             if self._webChannel.objects[objectId] == qObject:
