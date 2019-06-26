@@ -160,7 +160,7 @@ class QObject(object):
             self._bindGetterSetter(prop)
 
         for signal in data["signals"]:
-            self._addSignal(signal, False)
+            self._addSignal(signal)
 
         for name, values in data.get("enums", {}).items():
             setattr(self.__class__, name, enum.IntEnum(name, values))
@@ -169,7 +169,7 @@ class QObject(object):
     def __dir__(self):
         def keep(member):
             obj = inspect.getattr_static(self, member)
-            return (((hasattr(obj, 'isQtMethod') or isinstance(obj, Signal))
+            return (((hasattr(obj, 'isQtMethod') or isinstance(obj, SignalDescriptor))
                      and '(' not in member) or isinstance(obj, property)
                      or issubclass(type(obj), enum.EnumMeta))
 
@@ -224,13 +224,11 @@ class QObject(object):
         for propertyIdx in range(len(self._propertyCache)):
             self._propertyCache[propertyIdx] = self._unwrapQObject(self._propertyCache[propertyIdx])
 
-    def _addSignal(self, signalData, isPropertyNotifySignal):
+    def _addSignal(self, signalData, propertyName=None):
         signalName = signalData[0];
         signalIndex = signalData[1];
 
-        sigInstance = Signal(self, signalIndex, signalName, isPropertyNotifySignal)
-
-        setattr(self.__class__, signalName, sigInstance)
+        setattr(self.__class__, signalName, SignalDescriptor(signalIndex, signalName, propertyName))
 
     def _invokeSignalCallbacks(self, signalName, signalArgs):
         """Invokes all callbacks for the given signalname. Also works for property notify callbacks."""
@@ -303,7 +301,7 @@ class QObject(object):
             if notifySignalData[0] == 1:
                 # signal name is optimized away, reconstruct the actual name
                 notifySignalData[0] = propertyName + "Changed";
-            self._addSignal(notifySignalData, True)
+            self._addSignal(notifySignalData, propertyName)
 
         def getter(self):
             propertyValue = self._propertyCache[propertyIndex];
@@ -331,7 +329,32 @@ class QObject(object):
                 "value": valueToSend
             });
 
-        setattr(self.__class__, propertyName, property(getter, setter))
+        setattr(self.__class__, propertyName, property(getter, setter, doc="Property"))
+
+
+class SignalDescriptor:
+
+    def __init__(self, signalIndex, signalName, propertyName):
+        self.signalIndex = signalIndex
+        self.signalName = signalName
+        self.propertyName = propertyName
+
+        if propertyName is not None:
+            self.__doc__ = "Change notification signal for property {}".format(propertyName)
+        else:
+            self.__doc__ = "Signal"
+
+    def __get__(self, obj, type=None):
+        attrname = "_signal_" + self.signalName
+        try:
+            return getattr(obj, attrname)
+        except AttributeError:
+            signal = Signal(obj, self.signalIndex, self.signalName, self.propertyName is not None)
+            setattr(obj, attrname, signal)
+            return signal
+
+    def __set__(self, obj, value):
+        raise AttributeError()
 
 
 class Signal(object):
