@@ -1,4 +1,4 @@
-from pywebchannel.async import QWebChannel
+from pywebchannel.asyncronous import QWebChannel
 import websockets
 import websockets.client
 import asyncio
