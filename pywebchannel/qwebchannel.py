@@ -304,12 +304,7 @@ class QObject(object):
             self._addSignal(notifySignalData, propertyName)
 
         def getter(self):
-            propertyValue = self._propertyCache[propertyIndex];
-            if propertyValue is None:
-                # This shouldn't happen
-                print("Undefined value in property cache for property \"" + propertyName + "\" in object " + self._id)
-
-            return propertyValue;
+            return self._propertyCache[propertyIndex];
 
         def setter(self, value):
             if value is None:
