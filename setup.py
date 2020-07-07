@@ -14,10 +14,10 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/menlosystems/pywebchannel",
     packages=setuptools.find_packages(),
-    classifiers=(
+    classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)",
         "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)",
         "Operating System :: OS Independent",
-    ),
+    ],
 )
