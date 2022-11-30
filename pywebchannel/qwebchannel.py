@@ -31,6 +31,9 @@ class QWebChannel(object):
     def __init__(self, initCallback=None):
         self.initCallback = initCallback
         self.__initialized = False
+        self.objects = {}
+        self.execCallbacks = {};
+        self.execId = 0;
 
     def initialized(self):
         self.__initialized = True
@@ -81,9 +84,6 @@ class QWebChannel(object):
         else:
             print("invalid message received: ", data)
 
-    execCallbacks = {};
-    execId = 0;
-
     def exec_(self, data, callback=None):
         if not callback:
             # if no callback is given, send directly
@@ -103,8 +103,6 @@ class QWebChannel(object):
         self.execCallbacks[data["id"]] = callback;
 
         self.send(data);
-
-    objects = {}
 
     def handleSignal(self, message):
         object = self.objects.get(message["object"], None);
