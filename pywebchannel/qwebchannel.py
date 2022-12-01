@@ -23,8 +23,6 @@ class QWebChannelMessageTypes(enum.IntEnum):
 
 class QWebChannel(object):
 
-    initCallback = None
-
     # set to QObject further down
     QObjectType = None
 
@@ -32,8 +30,8 @@ class QWebChannel(object):
         self.initCallback = initCallback
         self.__initialized = False
         self.objects = {}
-        self.execCallbacks = {};
-        self.execId = 0;
+        self.execCallbacks = {}
+        self.execId = 0
 
     def initialized(self):
         self.__initialized = True
