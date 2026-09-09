@@ -1,11 +1,11 @@
 from .qwebchannel import (QObject as PlainQObject,
                           QWebChannel as PlainQWebChannel)
 import asyncio
-import inspect
 import json
 
 
 class QObject(PlainQObject):
+    """A QObject whose remote methods return awaitables instead of taking a callback."""
 
     def _addMethod(self, methodData):
         super()._addMethod(methodData)
@@ -27,16 +27,17 @@ class QObject(PlainQObject):
 
 
 class QWebChannel(PlainQWebChannel):
+    """A QWebChannel that can be awaited to wait for the initialization to complete.
+
+    Must be created from within a running event loop, or with an explicit `loop`.
+    """
 
     QObjectType = QObject
 
-    def __init__(self, *args, loop=None, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, initCallback=None, *, loop=None):
+        super().__init__(initCallback)
 
-        if loop is None:
-            loop = asyncio.get_event_loop()
-        self._loop = loop
-
+        self._loop = loop if loop is not None else asyncio.get_running_loop()
         self.__initialized_future = self._loop.create_future()
 
     def __await__(self):
@@ -47,7 +48,7 @@ class QWebChannel(PlainQWebChannel):
         self._loop.call_soon_threadsafe(self.__initialized_future.set_result, None)
 
 
-class QWebChannelProtocol(QWebChannel):
+class QWebChannelProtocol(QWebChannel, asyncio.Protocol):
     """A QWebChannel subclass implementing the asyncio.Protocol interface.
 
     For use with streaming transports. Assumes newline-delimited messages.
@@ -60,18 +61,19 @@ class QWebChannelProtocol(QWebChannel):
     def _try_process_messages(self):
         msgs = self._buf.split(b'\n')
 
-        # This is either empty (if last char is '\n') or contains an incomplete message, so we're good.
+        # This is either empty (if the last char is '\n') or holds an incomplete message.
         self._buf = msgs[-1]
 
-        # Strip of incomplete or empty message
-        msgs = msgs[:-1]
-
-        for msg in msgs:
-            self.message_received(msg.decode('utf-8'))
+        for msg in msgs[:-1]:
+            if msg:
+                self.message_received(msg.decode('utf-8'))
 
     def data_received(self, data):
         self._buf += data
         self._try_process_messages()
+
+    def connection_lost(self, exc):
+        self.connection_closed()
 
     def send(self, data):
         if not isinstance(data, str):

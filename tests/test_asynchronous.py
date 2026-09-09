@@ -112,4 +112,6 @@ def test_protocol_splits_newline_delimited_messages():
         assert seen == [("hi",)]
         assert MsgType.idle in [m["type"] for m in transport.messages()]
 
+        channel.connection_lost(None)
+
     asyncio.run(main())
