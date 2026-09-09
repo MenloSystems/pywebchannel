@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 from .qwebchannel import (QObject as PlainQObject,
                           QWebChannel as PlainQWebChannel)
 import asyncio
@@ -12,7 +10,7 @@ class QObject(PlainQObject):
     def _addMethod(self, methodData):
         super()._addMethod(methodData)
 
-        methodName = methodData[0];
+        methodName = methodData[0]
         method = getattr(self, methodName)
 
         def amethod(*args):
@@ -24,7 +22,7 @@ class QObject(PlainQObject):
             method(*args, handleResponse)
             return fut
 
-        setattr(amethod, 'isQtMethod', True)
+        amethod.isQtMethod = True
         setattr(self, methodName, amethod)
 
 
@@ -50,9 +48,10 @@ class QWebChannel(PlainQWebChannel):
 
 
 class QWebChannelProtocol(QWebChannel):
-    '''A QWebChannel subclass implementing the asyncio.Protocol interface.
+    """A QWebChannel subclass implementing the asyncio.Protocol interface.
 
-    For use with streaming transports. Assumes newline-delimited messages.'''
+    For use with streaming transports. Assumes newline-delimited messages.
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
