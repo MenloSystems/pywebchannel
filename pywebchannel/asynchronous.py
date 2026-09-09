@@ -14,10 +14,16 @@ class QObject(PlainQObject):
         method = getattr(self, methodName)
 
         def amethod(*args):
-            fut = self._webChannel._loop.create_future()
+            loop = self._webChannel._loop
+            fut = loop.create_future()
 
-            def handleResponse(*args):
-                self._webChannel._loop.call_soon_threadsafe(fut.set_result, *args)
+            def handleResponse(response):
+                def setResult():
+                    # the caller may have cancelled the future in the meantime
+                    if not fut.done():
+                        fut.set_result(response)
+
+                loop.call_soon_threadsafe(setResult)
 
             method(*args, handleResponse)
             return fut
@@ -45,7 +51,8 @@ class QWebChannel(PlainQWebChannel):
 
     def initialized(self):
         super().initialized()
-        self._loop.call_soon_threadsafe(self.__initialized_future.set_result, None)
+        if not self.__initialized_future.done():
+            self._loop.call_soon_threadsafe(self.__initialized_future.set_result, None)
 
 
 class QWebChannelProtocol(QWebChannel, asyncio.Protocol):

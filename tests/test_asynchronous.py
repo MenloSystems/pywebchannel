@@ -72,6 +72,32 @@ def test_methods_return_awaitables():
     assert asyncio.run(main()) is True
 
 
+def test_a_cancelled_call_does_not_raise_in_the_loop():
+    errors = []
+
+    async def main():
+        asyncio.get_running_loop().set_exception_handler(
+            lambda loop, context: errors.append(context)
+        )
+
+        transport = FakeTransport()
+        channel = QWebChannel()
+        init(channel, transport)
+        await channel
+
+        result = channel.objects["chatserver"].login("bob")
+        result.cancel()
+
+        msg = transport.last(MsgType.invokeMethod)
+        channel.message_received({"type": MsgType.response, "id": msg["id"], "data": True})
+
+        # let the queued call_soon_threadsafe() callback run
+        await asyncio.sleep(0)
+
+    asyncio.run(main())
+    assert errors == []
+
+
 def test_methods_keep_the_isqtmethod_marker():
     async def main():
         channel = QWebChannel()
