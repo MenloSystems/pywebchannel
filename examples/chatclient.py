@@ -1,92 +1,112 @@
-from pywebchannel.asynchronous import QWebChannel
-import websockets
-import websockets.client
+#!/usr/bin/env python3
+"""Chat client for the `chatserver` example that comes with QtWebChannel.
+
+Run it with the optional dependencies installed:
+
+    pip install -e ".[examples]"
+    python examples/chatclient.py
+"""
+
+from __future__ import annotations
+
 import asyncio
+import contextlib
+from collections.abc import Callable
+from typing import Any
+
 from aioconsole import ainput
-import json
-import sys
+from websockets.asyncio.client import ClientConnection, connect
+
+from pywebchannel.asynchronous import QWebChannel
+
+CHATSERVER_URL = "ws://localhost:12345"
 
 
-CHATSERVER_URL = 'ws://localhost:12345'
+class WebSocketTransport:
+    """Adapts a websockets connection to the transport interface of QWebChannel.
+
+    QWebChannel.send() is synchronous, so every message is sent in its own task.
+    """
+
+    def __init__(self, connection: ClientConnection) -> None:
+        self._connection = connection
+        self._tasks: set[asyncio.Task[None]] = set()
+
+    def send(self, data: str) -> None:
+        task = asyncio.create_task(self._connection.send(data))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
 
-class QWebChannelWebSocketProtocol(websockets.client.WebSocketClientProtocol):
-    """ Bridges WebSocketClientProtocol and QWebChannel.
-
-    Continuously reads messages in a task and invokes QWebChannel.message_received()
-    for each. Calls QWebChannel.connection_open() when connected.
-    Also patches QWebChannel.send() to run the websocket's send() in a task"""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def _task_send(self, data):
-        if not isinstance(data, str):
-            data = json.dumps(data)
-        self.loop.create_task(self.send(data))
-
-    def connection_open(self):
-        super().connection_open()
-
-        self.webchannel = QWebChannel()
-        self.webchannel.send = self._task_send
-        self.webchannel.connection_made(self)
-
-        self.loop.create_task(self.read_msgs())
-
-    async def read_msgs(self):
-        async for msg in self:
-            self.webchannel.message_received(msg)
+async def read_messages(connection: ClientConnection, webchannel: QWebChannel) -> None:
+    async for message in connection:
+        webchannel.message_received(message)
 
 
-def print_newmessage(time, user, message):
-    print("[{}] {}: {}".format(time, user, message))
+def print_newmessage(time: str, user: str, message: str) -> None:
+    print(f"[{time}] {user}: {message}")
 
 
-userlist = []
+def make_userlist_printer() -> Callable[[Any], None]:
+    userlist: list[str] = []
 
-def print_newusers(chatserver):
-    global userlist
+    def print_newusers(chatserver: Any) -> None:
+        nonlocal userlist
 
-    if chatserver.userList != userlist:
-        userlist = chatserver.userList
-        print("User list changed: {}".format(userlist))
+        if chatserver.userList != userlist:
+            userlist = chatserver.userList
+            print(f"User list changed: {userlist}")
+
+    return print_newusers
 
 
-async def run(webchannel):
-    # Wait for initialized
+async def chat(webchannel: QWebChannel) -> None:
+    # Wait for the initialization to complete
     await webchannel
     print("Connected.")
 
     chatserver = webchannel.objects["chatserver"]
 
-    username = None
-
-    async def login():
-        nonlocal username
-        username = input("Enter your name: ")
-        return await chatserver.login(username)
+    async def login() -> str | None:
+        name = await ainput("Enter your name: ")
+        return name if await chatserver.login(name) else None
 
     # Loop until we get a valid username
-    while not await login():
+    username = await login()
+    while username is None:
         print("Username already taken. Please enter a new one.")
+        username = await login()
 
     # Keep the username alive
     chatserver.keepAlive.connect(lambda *args: chatserver.keepAliveResponse(username))
 
-    # Connect to chat signals
+    # Connect to the chat signals
     chatserver.newMessage.connect(print_newmessage)
+    print_newusers = make_userlist_printer()
     chatserver.userListChanged.connect(lambda *args: print_newusers(chatserver))
 
     # Read and send input
     while True:
-        msg = await ainput()
-        chatserver.sendMessage(username, msg)
+        message = await ainput()
+        chatserver.sendMessage(username, message)
 
-try:
-    loop = asyncio.get_event_loop()
+
+async def main() -> None:
     print("Connecting...")
-    proto = loop.run_until_complete(websockets.client.connect(CHATSERVER_URL, create_protocol=QWebChannelWebSocketProtocol))
-    loop.run_until_complete(run(proto.webchannel))
-except KeyboardInterrupt:
+    async with connect(CHATSERVER_URL) as connection:
+        webchannel = QWebChannel()
+        webchannel.connection_made(WebSocketTransport(connection))
+
+        reader = asyncio.create_task(read_messages(connection, webchannel))
+        try:
+            await chat(webchannel)
+        finally:
+            reader.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reader
+
+
+if __name__ == "__main__":
+    with contextlib.suppress(KeyboardInterrupt, EOFError):
+        asyncio.run(main())
     print("Quit.")
