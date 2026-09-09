@@ -216,6 +216,7 @@ def test_init_unwraps_properties_with_non_contiguous_indices():
 
     assert channel.objects["client"].peer is channel.objects["chatserver"]
 
+
 def test_messages_before_initialization_are_ignored():
     transport = FakeTransport()
     channel = QWebChannel()
@@ -244,6 +245,7 @@ def test_unknown_response_id_is_ignored():
     channel, _ = make_channel({"chatserver": CHATSERVER})
 
     channel.message_received({"type": MsgType.response, "id": 4711, "data": None})
+
 
 def test_string_messages_are_decoded():
     channel, _ = make_channel({"chatserver": CHATSERVER})

@@ -32,7 +32,7 @@ Homepage = "https://github.com/MenloSystems/pywebchannel"
 Source = "https://github.com/MenloSystems/pywebchannel"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.6"]
 
 [tool.setuptools]
 packages = ["pywebchannel"]
@@ -40,3 +40,13 @@ packages = ["pywebchannel"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# The public API mirrors the camelCase names of Qt's WebChannel protocol.
+"pywebchannel/*.py" = ["N802", "N803", "N806", "N815"]

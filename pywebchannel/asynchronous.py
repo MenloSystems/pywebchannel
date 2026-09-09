@@ -2,10 +2,11 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only OR GPL-2.0-or-later
 
-from .qwebchannel import (QObject as PlainQObject,
-                          QWebChannel as PlainQWebChannel)
 import asyncio
 import json
+
+from .qwebchannel import QObject as PlainQObject
+from .qwebchannel import QWebChannel as PlainQWebChannel
 
 
 class QObject(PlainQObject):
@@ -67,17 +68,17 @@ class QWebChannelProtocol(QWebChannel, asyncio.Protocol):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._buf = b''
+        self._buf = b""
 
     def _try_process_messages(self):
-        msgs = self._buf.split(b'\n')
+        msgs = self._buf.split(b"\n")
 
         # This is either empty (if the last char is '\n') or holds an incomplete message.
         self._buf = msgs[-1]
 
         for msg in msgs[:-1]:
             if msg:
-                self.message_received(msg.decode('utf-8'))
+                self.message_received(msg.decode("utf-8"))
 
     def data_received(self, data):
         self._buf += data
@@ -89,4 +90,4 @@ class QWebChannelProtocol(QWebChannel, asyncio.Protocol):
     def send(self, data):
         if not isinstance(data, str):
             data = json.dumps(data)
-        self.transport.write((data + '\n').encode('utf-8'))
+        self.transport.write((data + "\n").encode("utf-8"))

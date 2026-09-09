@@ -5,12 +5,11 @@
 # SPDX-License-Identifier: LGPL-3.0-only OR GPL-2.0-or-later
 
 import contextlib
+import enum
+import inspect
 import json
 import logging
 import sys
-import enum
-import inspect
-
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +28,6 @@ class QWebChannelMessageTypes(enum.IntEnum):
 
 
 class QObject:
-
     def __init__(self, name, data, webChannel):
         self._id = name
         self._webChannel = webChannel
@@ -58,29 +56,27 @@ class QObject:
         for enumName, values in data.get("enums", {}).items():
             setattr(self.__class__, enumName, enum.IntEnum(enumName, values))
 
-
     def __dir__(self):
         def keep(member):
             obj = inspect.getattr_static(self, member)
             return (
-                (hasattr(obj, 'isQtMethod') or isinstance(obj, SignalDescriptor))
-                and '(' not in member
+                (hasattr(obj, "isQtMethod") or isinstance(obj, SignalDescriptor))
+                and "(" not in member
             ) or isinstance(obj, (property, enum.EnumMeta))
 
-        return [ x for x in super().__dir__() if keep(x) ]
-
+        return [x for x in super().__dir__() if keep(x)]
 
     def _unwrapQObject(self, response):
         if isinstance(response, list):
             # support list of objects
-            return [ self._unwrapQObject(entry) for entry in response ]
+            return [self._unwrapQObject(entry) for entry in response]
 
         if not isinstance(response, dict):
             return response
 
         # Support QObjects as values in a map
         if "__QObject*__" not in response or "id" not in response:
-            return { k: self._unwrapQObject(v) for k, v in response.items() }
+            return {k: self._unwrapQObject(v) for k, v in response.items()}
 
         objectId = response["id"]
         if objectId in self._webChannel.objects:
@@ -99,7 +95,6 @@ class QObject:
                 # just assigning {} though would not have the desired effect, but the
                 # below also ensures all external references will see the empty map
                 # NOTE: this detour is necessary to workaround QTBUG-40021
-
 
         qObject.destroyed.connect(destroyedFunction)
 
@@ -148,7 +143,7 @@ class QObject:
                 if callable(arg):
                     callback = arg
                 elif isinstance(arg, QObject) and arg._id in self._webChannel.objects:
-                    args.append({ "id": arg._id })
+                    args.append({"id": arg._id})
                 else:
                     args.append(arg)
 
@@ -157,12 +152,15 @@ class QObject:
                 if callback:
                     callback(result)
 
-            self._webChannel.exec_({
-                "type": QWebChannelMessageTypes.invokeMethod,
-                "object": self._id,
-                "method": methodIdx,
-                "args": args
-            }, responseCallback)
+            self._webChannel.exec_(
+                {
+                    "type": QWebChannelMessageTypes.invokeMethod,
+                    "object": self._id,
+                    "method": methodIdx,
+                    "args": args,
+                },
+                responseCallback,
+            )
 
         method.isQtMethod = True
 
@@ -195,20 +193,21 @@ class QObject:
 
             valueToSend = value
             if isinstance(value, QObject) and value._id in self._webChannel.objects:
-                valueToSend = { "id": value._id }
+                valueToSend = {"id": value._id}
 
-            self._webChannel.exec_({
-                "type": QWebChannelMessageTypes.setProperty,
-                "object": self._id,
-                "property": propertyIndex,
-                "value": valueToSend
-            })
+            self._webChannel.exec_(
+                {
+                    "type": QWebChannelMessageTypes.setProperty,
+                    "object": self._id,
+                    "property": propertyIndex,
+                    "value": valueToSend,
+                }
+            )
 
         setattr(self.__class__, propertyName, property(getter, setter, doc="Property"))
 
 
 class SignalDescriptor:
-
     def __init__(self, signalIndex, signalName, propertyName):
         self.signalIndex = signalIndex
         self.signalName = signalName
@@ -233,7 +232,6 @@ class SignalDescriptor:
 
 
 class Signal:
-
     def __init__(self, qObject, signalIndex, signalName, isPropertyNotifySignal):
         self._qObject = qObject
         self._signalIndex = signalIndex
@@ -250,11 +248,13 @@ class Signal:
         if not self.isPropertyNotifySignal and self._signalName != "destroyed":
             # only required for "pure" signals, handled separately for properties in _propertyUpdate
             # also note that we always get notified about the destroyed signal
-            self._qObject._webChannel.exec_({
-                "type": QWebChannelMessageTypes.connectToSignal,
-                "object": self._qObject._id,
-                "signal": self._signalIndex
-            })
+            self._qObject._webChannel.exec_(
+                {
+                    "type": QWebChannelMessageTypes.connectToSignal,
+                    "object": self._qObject._id,
+                    "signal": self._signalIndex,
+                }
+            )
 
     def disconnect(self, callback):
         if not callable(callback):
@@ -264,24 +264,23 @@ class Signal:
         callbacks = self._qObject._objectSignals.setdefault(self._signalIndex, [])
 
         if callback not in callbacks:
-            logger.warning(
-                "Cannot find connection of signal %s to %s", self._signalName, callback
-            )
+            logger.warning("Cannot find connection of signal %s to %s", self._signalName, callback)
             return
 
         callbacks.remove(callback)
 
         if not self.isPropertyNotifySignal and not callbacks:
             # only required for "pure" signals, handled separately for properties in _propertyUpdate
-            self._qObject._webChannel.exec_({
-                "type": QWebChannelMessageTypes.disconnectFromSignal,
-                "object": self._qObject._id,
-                "signal": self._signalIndex
-            })
+            self._qObject._webChannel.exec_(
+                {
+                    "type": QWebChannelMessageTypes.disconnectFromSignal,
+                    "object": self._qObject._id,
+                    "signal": self._signalIndex,
+                }
+            )
 
 
 class QWebChannel:
-
     QObjectType = QObject
 
     def __init__(self, initCallback=None):
@@ -366,9 +365,7 @@ class QWebChannel:
         if qObject is not None:
             qObject._signalEmitted(message["signal"], message.get("args", []))
         else:
-            logger.warning(
-                "Unhandled signal: %s::%s", message.get("object"), message.get("signal")
-            )
+            logger.warning("Unhandled signal: %s::%s", message.get("object"), message.get("signal"))
 
     def handleResponse(self, message):
         if "id" not in message:
