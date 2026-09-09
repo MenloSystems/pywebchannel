@@ -1,3 +1,4 @@
+import contextlib
 import json
 import logging
 import sys
@@ -48,16 +49,17 @@ class QObject:
         for signal in data["signals"]:
             self._addSignal(signal)
 
-        for name, values in data.get("enums", {}).items():
-            setattr(self.__class__, name, enum.IntEnum(name, values))
+        for enumName, values in data.get("enums", {}).items():
+            setattr(self.__class__, enumName, enum.IntEnum(enumName, values))
 
 
     def __dir__(self):
         def keep(member):
             obj = inspect.getattr_static(self, member)
-            return (((hasattr(obj, 'isQtMethod') or isinstance(obj, SignalDescriptor))
-                     and '(' not in member) or isinstance(obj, property)
-                     or issubclass(type(obj), enum.EnumMeta))
+            return (
+                (hasattr(obj, 'isQtMethod') or isinstance(obj, SignalDescriptor))
+                and '(' not in member
+            ) or isinstance(obj, (property, enum.EnumMeta))
 
         return [ x for x in super().__dir__() if keep(x) ]
 
@@ -69,10 +71,10 @@ class QObject:
 
         if not isinstance(response, dict):
             return response
-        else:
-            # Support QObjects as values in a map
-            if "__QObject*__" not in response or "id" not in response:
-                return { k: self._unwrapQObject(v) for k, v in response.items() }
+
+        # Support QObjects as values in a map
+        if "__QObject*__" not in response or "id" not in response:
+            return { k: self._unwrapQObject(v) for k, v in response.items() }
 
         objectId = response["id"]
         if objectId in self._webChannel.objects:
@@ -84,8 +86,8 @@ class QObject:
 
         qObject = self._webChannel.QObjectType(objectId, response["data"], self._webChannel)
 
-        def destroyedFunction():
-            if self._webChannel.objects[objectId] == qObject:
+        def destroyedFunction(*args):
+            if self._webChannel.objects[objectId] is qObject:
                 del self._webChannel.objects[objectId]
                 # reset the now deleted QObject to an empty {} object
                 # just assigning {} though would not have the desired effect, but the
@@ -104,41 +106,34 @@ class QObject:
             self._propertyCache[propertyIdx] = self._unwrapQObject(self._propertyCache[propertyIdx])
 
     def _addSignal(self, signalData, propertyName=None):
-        signalName = signalData[0]
-        signalIndex = signalData[1]
+        signalName, signalIndex = signalData[0], signalData[1]
 
         setattr(self.__class__, signalName, SignalDescriptor(signalIndex, signalName, propertyName))
 
     def _invokeSignalCallbacks(self, signalName, signalArgs):
-        """Invokes all callbacks for the given signalname. Also works for property notify callbacks."""
-        try:
+        """Invoke all callbacks for the given signal. Also works for property notify signals."""
+        with contextlib.suppress(ValueError):
             signalName = int(signalName)
-        except ValueError:
-            pass
 
-        if signalName not in self._objectSignals:
-            return
-
-        for callback in self._objectSignals[signalName]:
+        # iterate over a copy: a callback may disconnect itself
+        for callback in list(self._objectSignals.get(signalName, [])):
             callback(*signalArgs)
 
     def _propertyUpdate(self, signals, propertyMap):
         # update property cache
-        for propertyIndex in propertyMap:
-            propertyValue = propertyMap[propertyIndex]
+        for propertyIndex, propertyValue in propertyMap.items():
             self._propertyCache[int(propertyIndex)] = self._unwrapQObject(propertyValue)
 
-        for signalName in signals:
+        for signalName, signalArgs in signals.items():
             # Invoke all callbacks, as _signalEmitted() does not. This ensures the
             # property cache is updated before the callbacks are invoked.
-            self._invokeSignalCallbacks(signalName, signals[signalName])
+            self._invokeSignalCallbacks(signalName, signalArgs)
 
     def _signalEmitted(self, signalName, signalArgs):
         self._invokeSignalCallbacks(signalName, signalArgs)
 
     def _addMethod(self, methodData):
-        methodName = methodData[0]
-        methodIdx = methodData[1]
+        methodName, methodIdx = methodData[0], methodData[1]
 
         def method(self, *arguments):
             args = []
@@ -218,7 +213,7 @@ class SignalDescriptor:
         else:
             self.__doc__ = "Signal"
 
-    def __get__(self, obj, type=None):
+    def __get__(self, obj, objtype=None):
         attrname = "_signal_" + self.signalName
         try:
             return getattr(obj, attrname)
@@ -228,7 +223,7 @@ class SignalDescriptor:
             return signal
 
     def __set__(self, obj, value):
-        raise AttributeError()
+        raise AttributeError(f"Cannot assign to signal {self.signalName}")
 
 
 class Signal:
@@ -244,9 +239,7 @@ class Signal:
             logger.warning("Bad callback given to connect to signal %s", self._signalName)
             return
 
-        if self._signalIndex not in self._qObject._objectSignals:
-            self._qObject._objectSignals[self._signalIndex] = []
-        self._qObject._objectSignals[self._signalIndex].append(callback)
+        self._qObject._objectSignals.setdefault(self._signalIndex, []).append(callback)
 
         if not self.isPropertyNotifySignal and self._signalName != "destroyed":
             # only required for "pure" signals, handled separately for properties in _propertyUpdate
@@ -262,18 +255,17 @@ class Signal:
             logger.warning("Bad callback given to disconnect from signal %s", self._signalName)
             return
 
-        if self._signalIndex not in self._qObject._objectSignals:
-            self._qObject._objectSignals[self._signalIndex] = []
+        callbacks = self._qObject._objectSignals.setdefault(self._signalIndex, [])
 
-        if callback not in self._qObject._objectSignals[self._signalIndex]:
+        if callback not in callbacks:
             logger.warning(
                 "Cannot find connection of signal %s to %s", self._signalName, callback
             )
             return
 
-        self._qObject._objectSignals[self._signalIndex].remove(callback)
+        callbacks.remove(callback)
 
-        if not self.isPropertyNotifySignal and len(self._qObject._objectSignals[self._signalIndex]) == 0:
+        if not self.isPropertyNotifySignal and not callbacks:
             # only required for "pure" signals, handled separately for properties in _propertyUpdate
             self._qObject._webChannel.exec_({
                 "type": QWebChannelMessageTypes.disconnectFromSignal,
@@ -292,22 +284,23 @@ class QWebChannel:
         self.objects = {}
         self.execCallbacks = {}
         self.execId = 0
+        self.transport = None
 
     def initialized(self):
         self.__initialized = True
-        if (self.initCallback):
+        if self.initCallback:
             self.initCallback(self)
 
     def connection_made(self, transport):
         self.transport = transport
 
         def callback(data):
-            for objectName in data:
-                self.QObjectType(objectName, data[objectName], self)
+            for objectName, objectData in data.items():
+                self.QObjectType(objectName, objectData, self)
 
             # now unwrap properties, which might reference other registered objects
-            for objectName in self.objects.copy():
-                self.objects[objectName]._unwrapProperties()
+            for qObject in list(self.objects.values()):
+                qObject._unwrapProperties()
 
             self.initialized()
 
@@ -325,7 +318,7 @@ class QWebChannel:
         self.transport.send(data)
 
     def message_received(self, data):
-        if isinstance(data, str):
+        if isinstance(data, (str, bytes)):
             data = json.loads(data)
 
         if data["type"] == QWebChannelMessageTypes.response:
@@ -357,13 +350,13 @@ class QWebChannel:
             return
 
         data["id"] = self.execId
-        self.execId = self.execId + 1
+        self.execId += 1
         self.execCallbacks[data["id"]] = callback
 
         self.send(data)
 
     def handleSignal(self, message):
-        qObject = self.objects.get(message["object"], None)
+        qObject = self.objects.get(message["object"])
         if qObject is not None:
             qObject._signalEmitted(message["signal"], message.get("args", []))
         else:
@@ -385,7 +378,7 @@ class QWebChannel:
 
     def handle_propertyUpdate(self, message):
         for data in message["data"]:
-            qObject = self.objects.get(data["object"], None)
+            qObject = self.objects.get(data["object"])
             if qObject is not None:
                 qObject._propertyUpdate(data["signals"], data["properties"])
             else:
