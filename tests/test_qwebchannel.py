@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from pywebchannel.qwebchannel import QWebChannel
-from pywebchannel.qwebchannel import QWebChannelMessageTypes as MsgType
+from pywebchannel import QWebChannel
+from pywebchannel import QWebChannelMessageTypes as MsgType
 
 CHATSERVER = {
     "methods": [["login", 3], ["sendMessage", 4]],

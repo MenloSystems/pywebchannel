@@ -1,7 +1,7 @@
 import asyncio
 import json
 
-from pywebchannel.qwebchannel import QWebChannelMessageTypes as MsgType
+from pywebchannel import QWebChannelMessageTypes as MsgType
 from pywebchannel.asynchronous import QWebChannel, QWebChannelProtocol
 
 from .test_qwebchannel import CHATSERVER, FakeTransport
