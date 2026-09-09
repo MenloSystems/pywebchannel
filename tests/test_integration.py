@@ -33,7 +33,7 @@ def test_channel_over_a_tcp_connection():
         server = await asyncio.start_server(serve, "127.0.0.1", 0)
         port = server.sockets[0].getsockname()[1]
 
-        async with server:
+        try:
             loop = asyncio.get_running_loop()
             transport, channel = await loop.create_connection(
                 QWebChannelProtocol, "127.0.0.1", port
@@ -48,5 +48,9 @@ def test_channel_over_a_tcp_connection():
                 assert result == "called 3 with ['bob']"
             finally:
                 transport.close()
+        finally:
+            # Only close the server. "async with server" and wait_closed() do
+            # not return in Python 3.12 after a client closed its connection.
+            server.close()
 
     asyncio.run(main())
