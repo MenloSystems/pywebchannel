@@ -206,6 +206,16 @@ def test_destroyed_signal_unregisters_the_object():
     assert "room1" not in channel.objects
 
 
+def test_init_unwraps_properties_with_non_contiguous_indices():
+    server = {
+        "methods": [],
+        "properties": [[9, "peer", None, {"__QObject*__": True, "id": "chatserver"}]],
+        "signals": [],
+    }
+    channel, _ = make_channel({"chatserver": CHATSERVER, "client": server})
+
+    assert channel.objects["client"].peer is channel.objects["chatserver"]
+
 def test_messages_before_initialization_are_ignored():
     transport = FakeTransport()
     channel = QWebChannel()

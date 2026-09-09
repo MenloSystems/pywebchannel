@@ -217,7 +217,7 @@ class QObject(object):
         return qObject;
 
     def _unwrapProperties(self):
-        for propertyIdx in range(len(self._propertyCache)):
+        for propertyIdx in list(self._propertyCache):
             self._propertyCache[propertyIdx] = self._unwrapQObject(self._propertyCache[propertyIdx])
 
     def _addSignal(self, signalData, propertyName=None):
