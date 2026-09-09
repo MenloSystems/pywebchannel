@@ -37,6 +37,9 @@ dev = ["pytest>=8", "ruff>=0.6"]
 [tool.setuptools]
 packages = ["pywebchannel"]
 
+[tool.setuptools.package-data]
+pywebchannel = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
