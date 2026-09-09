@@ -1,7 +1,11 @@
 import json
+import logging
 import sys
 import enum
 import inspect
+
+
+logger = logging.getLogger(__name__)
 
 
 class QWebChannelMessageTypes(enum.IntEnum):
@@ -76,7 +80,7 @@ class QWebChannel:
         elif data["type"] == QWebChannelMessageTypes.propertyUpdate:
             self.handle_propertyUpdate(data)
         else:
-            print("invalid message received: ", data)
+            logger.warning("Invalid message received: %s", data)
 
     def exec_(self, data, callback=None):
         if not callback:
@@ -89,7 +93,7 @@ class QWebChannel:
             self.execId = 0
 
         if "id" in data:
-            print(f"Cannot exec message with property id: {json.dumps(data)}")
+            logger.error("Cannot exec message with property id: %s", json.dumps(data))
             return
 
         data["id"] = self.execId
@@ -103,16 +107,18 @@ class QWebChannel:
         if qObject is not None:
             qObject._signalEmitted(message["signal"], message.get("args", []))
         else:
-            print(f"Unhandled signal: {message.get('object')}::{message.get('signal')}")
+            logger.warning(
+                "Unhandled signal: %s::%s", message.get("object"), message.get("signal")
+            )
 
     def handleResponse(self, message):
         if "id" not in message:
-            print("Invalid response message received: ", json.dumps(message))
+            logger.warning("Invalid response message received: %s", json.dumps(message))
             return
 
         callback = self.execCallbacks.pop(message["id"], None)
         if callback is None:
-            print("Received response for unknown id: ", message["id"])
+            logger.warning("Received response for unknown id %s", message["id"])
             return
 
         callback(message["data"])
@@ -123,7 +129,7 @@ class QWebChannel:
             if qObject is not None:
                 qObject._propertyUpdate(data["signals"], data["properties"])
             else:
-                print(f"Unhandled property update for {data.get('object')}")
+                logger.warning("Unhandled property update for %s", data.get("object"))
         if self.__initialized:
             self.exec_({"type": QWebChannelMessageTypes.idle})
 
@@ -189,7 +195,7 @@ class QObject:
             return self._webChannel.objects[objectId]
 
         if "data" not in response:
-            print(f"Cannot unwrap unknown QObject {objectId} without data.")
+            logger.warning("Cannot unwrap unknown QObject %s without data.", objectId)
             return
 
         qObject = self._webChannel.QObjectType(objectId, response["data"], self._webChannel)
@@ -297,7 +303,7 @@ class QObject:
 
         def setter(self, value):
             if value is None:
-                print(f"Property setter for {propertyName} called with 'None' value!")
+                logger.warning("Property setter for %s called with 'None' value!", propertyName)
                 return
 
             self._propertyCache[propertyIndex] = value
@@ -351,7 +357,7 @@ class Signal:
 
     def connect(self, callback):
         if not callable(callback):
-            print(f"Bad callback given to connect to signal {self._signalName}")
+            logger.warning("Bad callback given to connect to signal %s", self._signalName)
             return
 
         if self._signalIndex not in self._qObject._objectSignals:
@@ -369,14 +375,16 @@ class Signal:
 
     def disconnect(self, callback):
         if not callable(callback):
-            print(f"Bad callback given to disconnect from signal {self._signalName}")
+            logger.warning("Bad callback given to disconnect from signal %s", self._signalName)
             return
 
         if self._signalIndex not in self._qObject._objectSignals:
             self._qObject._objectSignals[self._signalIndex] = []
 
         if callback not in self._qObject._objectSignals[self._signalIndex]:
-            print(f"Cannot find connection of signal {self._signalName} to {callback}")
+            logger.warning(
+                "Cannot find connection of signal %s to %s", self._signalName, callback
+            )
             return
 
         self._qObject._objectSignals[self._signalIndex].remove(callback)
