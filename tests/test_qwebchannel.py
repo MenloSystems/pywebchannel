@@ -240,6 +240,11 @@ def test_init_callback_is_invoked():
     assert seen == [channel]
 
 
+def test_unknown_response_id_is_ignored():
+    channel, _ = make_channel({"chatserver": CHATSERVER})
+
+    channel.message_received({"type": MsgType.response, "id": 4711, "data": None})
+
 def test_string_messages_are_decoded():
     channel, _ = make_channel({"chatserver": CHATSERVER})
 

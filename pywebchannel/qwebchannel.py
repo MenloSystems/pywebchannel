@@ -114,8 +114,12 @@ class QWebChannel(object):
             print("Invalid response message received: ", json.dumps(message))
             return
 
-        self.execCallbacks[message["id"]](message["data"])
-        del self.execCallbacks[message["id"]];
+        callback = self.execCallbacks.pop(message["id"], None)
+        if callback is None:
+            print("Received response for unknown id: ", message["id"])
+            return
+
+        callback(message["data"])
 
     def handle_propertyUpdate(self, message):
         for data in message["data"]:
