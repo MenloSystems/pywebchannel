@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections.abc import Callable, Generator
 from typing import Any
 
@@ -26,17 +27,14 @@ class QObject(PlainQObject):
         method = getattr(self, methodName)
 
         def amethod(*args: Any) -> asyncio.Future[Any]:
-            loop = self._webChannel._loop
+            loop = self._webChannel._getLoop()
             fut = loop.create_future()
 
             def handleResponse(response: Any) -> None:
-                def setResult() -> None:
-                    # the caller may have cancelled the future in the meantime
-                    if not fut.done():
-                        fut.set_result(response)
+                loop.call_soon_threadsafe(QWebChannel._resolve, fut, response)
 
-                loop.call_soon_threadsafe(setResult)
-
+            self._webChannel._pendingFutures.add(fut)
+            fut.add_done_callback(self._webChannel._pendingFutures.discard)
             method(*args, handleResponse)
             return fut
 
@@ -48,7 +46,9 @@ class QObject(PlainQObject):
 class QWebChannel(PlainQWebChannel):
     """A QWebChannel that can be awaited to wait for the initialization to complete.
 
-    Must be created from within a running event loop, or with an explicit `loop`.
+    The channel can be created without a running event loop. It uses the explicit `loop`
+    if one is given, and otherwise the loop that runs when the channel is awaited or a
+    remote method is called.
     """
 
     QObjectType = QObject
@@ -61,16 +61,72 @@ class QWebChannel(PlainQWebChannel):
     ) -> None:
         super().__init__(initCallback)
 
-        self._loop = loop if loop is not None else asyncio.get_running_loop()
-        self.__initialized_future: asyncio.Future[None] = self._loop.create_future()
+        self._explicitLoop = loop
+        self._pendingFutures: set[asyncio.Future[Any]] = set()
+
+        # The init future only exists once someone awaits the channel. The outcome is
+        # kept until then. The lock guards both, because messages may be processed
+        # outside the thread of the loop.
+        self._initLock = threading.Lock()
+        self._initFuture: asyncio.Future[None] | None = None
+        self._initDone = False
+        self._initError: Exception | None = None
+
+    def _getLoop(self) -> asyncio.AbstractEventLoop:
+        if self._explicitLoop is not None:
+            return self._explicitLoop
+        return asyncio.get_running_loop()
 
     def __await__(self) -> Generator[Any, None, None]:
-        return self.__initialized_future.__await__()
+        with self._initLock:
+            if self._initFuture is None:
+                self._initFuture = self._getLoop().create_future()
+                if self._initDone:
+                    self._settle(self._initFuture, self._initError)
+            fut = self._initFuture
+        return fut.__await__()
+
+    def _finishInit(self, error: Exception | None) -> None:
+        with self._initLock:
+            # the first outcome wins, like for a future
+            if self._initDone:
+                return
+            self._initDone = True
+            self._initError = error
+            fut = self._initFuture
+        if fut is not None:
+            fut.get_loop().call_soon_threadsafe(self._settle, fut, error)
 
     def initialized(self) -> None:
         super().initialized()
-        if not self.__initialized_future.done():
-            self._loop.call_soon_threadsafe(self.__initialized_future.set_result, None)
+        self._finishInit(None)
+
+    def connection_closed(self) -> None:
+        super().connection_closed()
+
+        # Fail what still waits for a response that cannot arrive any more
+        error = ConnectionError("The WebChannel connection was closed")
+        self._finishInit(error)
+        for fut in list(self._pendingFutures):
+            fut.get_loop().call_soon_threadsafe(self._fail, fut, error)
+
+    @classmethod
+    def _settle(cls, fut: asyncio.Future[None], error: Exception | None) -> None:
+        if error is None:
+            cls._resolve(fut, None)
+        else:
+            cls._fail(fut, error)
+
+    @staticmethod
+    def _resolve(fut: asyncio.Future[Any], result: Any) -> None:
+        # the future may be done already, e.g. cancelled by the caller
+        if not fut.done():
+            fut.set_result(result)
+
+    @staticmethod
+    def _fail(fut: asyncio.Future[Any], error: Exception) -> None:
+        if not fut.done():
+            fut.set_exception(error)
 
 
 class QWebChannelProtocol(QWebChannel, asyncio.Protocol):
@@ -81,7 +137,7 @@ class QWebChannelProtocol(QWebChannel, asyncio.Protocol):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._buf = b""
+        self._buf = bytearray()
 
     def _try_process_messages(self) -> None:
         msgs = self._buf.split(b"\n")
@@ -95,7 +151,10 @@ class QWebChannelProtocol(QWebChannel, asyncio.Protocol):
 
     def data_received(self, data: bytes) -> None:
         self._buf += data
-        self._try_process_messages()
+        # Only scan the buffer once a message is complete, so that a large message
+        # that arrives in many chunks is not split again for each chunk.
+        if b"\n" in data:
+            self._try_process_messages()
 
     def connection_lost(self, exc: Exception | None) -> None:
         self.connection_closed()

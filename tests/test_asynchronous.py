@@ -1,5 +1,8 @@
 import asyncio
+import gc
 import json
+
+import pytest
 
 from pywebchannel import QWebChannelMessageTypes as MsgType
 from pywebchannel.asynchronous import QWebChannel, QWebChannelProtocol
@@ -141,3 +144,153 @@ def test_protocol_splits_newline_delimited_messages():
         channel.connection_lost(None)
 
     asyncio.run(main())
+
+
+def test_pending_call_fails_when_the_connection_closes():
+    """
+    @scenario The connection closes while a method call is pending
+    @given An initialized channel with a pending method call
+    @when  The connection closes
+    @then  Awaiting the call raises ConnectionError instead of hanging
+    """
+
+    async def main():
+        # GIVEN: A method call waits for its response.
+        transport = FakeTransport()
+        channel = QWebChannel()
+        init(channel, transport)
+        await channel
+        result = channel.objects["chatserver"].login("bob")
+
+        # WHEN: The connection closes.
+        channel.connection_closed()
+
+        # THEN: The call fails.
+        with pytest.raises(ConnectionError):
+            await asyncio.wait_for(result, 1)
+
+    asyncio.run(main())
+
+
+def test_awaiting_the_channel_fails_when_the_connection_closes_before_init():
+    """
+    @scenario The connection closes before the initialization completes
+    @given A channel that waits for the init response
+    @when  The connection closes
+    @then  Awaiting the channel raises ConnectionError instead of hanging
+    """
+
+    async def main():
+        # GIVEN: The init request is sent, but not answered.
+        channel = QWebChannel()
+        channel.connection_made(FakeTransport())
+
+        # WHEN: The connection closes.
+        channel.connection_closed()
+
+        # THEN: Awaiting the channel fails.
+        with pytest.raises(ConnectionError):
+            await asyncio.wait_for(channel, 1)
+
+    asyncio.run(main())
+
+
+def test_double_initialization_does_not_raise_in_the_loop():
+    """
+    @scenario The channel initializes twice before the loop runs
+    @given A channel whose initialization was signalled once
+    @when  The initialization is signalled again before the loop runs
+    @then  No error reaches the exception handler of the loop
+    """
+    errors = []
+
+    async def main():
+        asyncio.get_running_loop().set_exception_handler(
+            lambda loop, context: errors.append(context)
+        )
+
+        # GIVEN: The channel signalled its initialization once.
+        channel = QWebChannel()
+        channel.initialized()
+
+        # WHEN: It signals the initialization again.
+        channel.initialized()
+
+        # THEN: Both queued callbacks run without errors.
+        await channel
+
+    asyncio.run(main())
+    assert errors == []
+
+
+def test_channel_can_be_created_and_initialized_outside_a_running_loop():
+    """
+    @scenario The channel is set up before the event loop runs
+    @given A channel created and initialized without a running loop
+    @when  The channel is awaited inside a loop
+    @then  The await completes and the objects are available
+    """
+    # GIVEN: The channel is created and initialized before any loop runs.
+    transport = FakeTransport()
+    channel = QWebChannel()
+    init(channel, transport)
+
+    # WHEN: A loop awaits the channel.
+    async def main():
+        await asyncio.wait_for(channel, 1)
+
+    asyncio.run(main())
+
+    # THEN: The channel is initialized.
+    assert "chatserver" in channel.objects
+
+
+def test_awaiting_fails_when_the_connection_closed_before_any_loop_ran():
+    """
+    @scenario The connection closes before the event loop runs
+    @given A channel whose connection closed without a running loop
+    @when  The channel is awaited inside a loop
+    @then  Awaiting the channel raises ConnectionError
+    """
+    # GIVEN: The connection closes before any loop runs.
+    channel = QWebChannel()
+    channel.connection_made(FakeTransport())
+    channel.connection_closed()
+
+    # WHEN: A loop awaits the channel.
+    async def main():
+        await asyncio.wait_for(channel, 1)
+
+    # THEN: The await fails.
+    with pytest.raises(ConnectionError):
+        asyncio.run(main())
+
+
+def test_unawaited_channel_does_not_log_an_error_when_the_connection_closes():
+    """
+    @scenario Nobody waits for the initialization
+    @given A channel inside a loop that is never awaited
+    @when  The connection closes before the initialization
+    @then  No error reaches the exception handler of the loop
+    """
+    errors = []
+
+    async def main():
+        asyncio.get_running_loop().set_exception_handler(
+            lambda loop, context: errors.append(context)
+        )
+
+        # GIVEN: A channel that nobody awaits.
+        channel = QWebChannel()
+        channel.connection_made(FakeTransport())
+
+        # WHEN: The connection closes.
+        channel.connection_closed()
+        del channel
+        await asyncio.sleep(0)
+        gc.collect()
+
+    asyncio.run(main())
+
+    # THEN: The loop saw no unretrieved exception.
+    assert errors == []
