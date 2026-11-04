@@ -322,12 +322,12 @@ def test_call_after_the_connection_closed_fails():
     asyncio.run(main())
 
 
-def test_channel_can_be_awaited_after_a_reconnect():
+def test_closed_channel_stays_closed_after_a_new_connection():
     """
-    @scenario The channel reconnects after the connection closed before init
-    @given A channel whose first connection closed before the initialization
+    @scenario Reconnecting is not supported
+    @given A channel whose connection closed before the initialization
     @when  A new connection is made and initialized
-    @then  Awaiting the channel completes
+    @then  Awaiting the channel and calling methods still raise ConnectionError
     """
 
     async def main():
@@ -339,8 +339,11 @@ def test_channel_can_be_awaited_after_a_reconnect():
         # WHEN: A new connection initializes the channel.
         init(channel, FakeTransport())
 
-        # THEN: Awaiting the channel completes.
-        await asyncio.wait_for(channel, 1)
+        # THEN: The channel stays closed.
+        with pytest.raises(ConnectionError):
+            await asyncio.wait_for(channel, 1)
+        with pytest.raises(ConnectionError):
+            await asyncio.wait_for(channel.objects["chatserver"].login("bob"), 1)
 
     asyncio.run(main())
 

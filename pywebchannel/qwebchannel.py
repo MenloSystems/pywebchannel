@@ -313,6 +313,9 @@ class QWebChannel:
 
     Feed incoming messages to :meth:`message_received` and call
     :meth:`connection_made` once the transport is ready.
+
+    A channel serves a single connection. Reconnecting is not supported, as the
+    objects of the old connection would not be updated, so use a new channel instead.
     """
 
     QObjectType: type[QObject] = QObject

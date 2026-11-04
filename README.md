@@ -49,6 +49,9 @@ asyncio.run(main())
 
 Use `dir(obj)` to see the interface of a remote object.
 
+A channel serves a single connection. Reconnecting is not supported, so create a new channel
+for a new connection.
+
 `examples/chatclient.py` is a larger example. It connects to the `chatserver` example that comes
 with QtWebChannel:
 

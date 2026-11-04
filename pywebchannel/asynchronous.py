@@ -53,6 +53,9 @@ class QWebChannel(PlainQWebChannel):
     The channel can be created without a running event loop. It uses the explicit `loop`
     if one is given, and otherwise the loop that runs when the channel is awaited or a
     remote method is called.
+
+    Once the connection closed, awaiting the channel and calling remote methods raise
+    ConnectionError. Reconnecting is not supported, so use a new channel instead.
     """
 
     QObjectType = QObject
@@ -131,16 +134,6 @@ class QWebChannel(PlainQWebChannel):
             fut = self._initFuture
         if fut is not None:
             self._callSoon(fut, self._settle, fut, error)
-
-    def connection_made(self, transport: Any) -> None:
-        with self._lock:
-            self._closed = False
-            # a new connection initializes the channel again
-            if self._initDone:
-                self._initDone = False
-                self._initError = None
-                self._initFuture = None
-        super().connection_made(transport)
 
     def initialized(self) -> None:
         try:
