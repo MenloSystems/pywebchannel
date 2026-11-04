@@ -23,6 +23,10 @@ Message = dict[str, Any]
 ResponseCallback = Callable[[Any], None]
 SignalCallback = Callable[..., None]
 
+# The server always notifies about these signals, so the client neither connects
+# to nor disconnects from them.
+DESTROYED_SIGNAL_NAMES = frozenset({"destroyed", "destroyed()", "destroyed(QObject*)"})
+
 
 class QWebChannelMessageTypes(enum.IntEnum):
     signal = 1
@@ -258,6 +262,11 @@ class Signal:
         self._signalName = signalName
         self.isPropertyNotifySignal = isPropertyNotifySignal
 
+    def _needsServerConnection(self) -> bool:
+        # Property notify signals are handled in _propertyUpdate, and the server
+        # always reports the destroyed signal.
+        return not self.isPropertyNotifySignal and self._signalName not in DESTROYED_SIGNAL_NAMES
+
     def connect(self, callback: SignalCallback) -> None:
         if not callable(callback):
             logger.warning("Bad callback given to connect to signal %s", self._signalName)
@@ -266,13 +275,7 @@ class Signal:
         callbacks = self._qObject._objectSignals.setdefault(self._signalIndex, [])
         callbacks.append(callback)
 
-        if (
-            not self.isPropertyNotifySignal
-            and self._signalName != "destroyed"
-            and len(callbacks) == 1
-        ):
-            # only required for "pure" signals, handled separately for properties in
-            # _propertyUpdate. Also note that we always get notified about the destroyed signal.
+        if self._needsServerConnection() and len(callbacks) == 1:
             # The server counts connections, so connect only once, like disconnect().
             self._qObject._webChannel.exec_(
                 {
@@ -295,8 +298,7 @@ class Signal:
 
         callbacks.remove(callback)
 
-        if not self.isPropertyNotifySignal and not callbacks:
-            # only required for "pure" signals, handled separately for properties in _propertyUpdate
+        if self._needsServerConnection() and not callbacks:
             self._qObject._webChannel.exec_(
                 {
                     "type": QWebChannelMessageTypes.disconnectFromSignal,
@@ -340,12 +342,17 @@ class QWebChannel:
                 qObject._unwrapProperties()
 
             self.initialized()
-            self.exec_({"type": QWebChannelMessageTypes.idle})
+
+            # the init callback may have closed the connection
+            if self.__initialized:
+                self.exec_({"type": QWebChannelMessageTypes.idle})
 
         self.exec_({"type": QWebChannelMessageTypes.init}, callback)
 
     def connection_closed(self) -> None:
         self.__initialized = False
+        # responses to pending requests cannot arrive any more
+        self.execCallbacks.clear()
 
     def send(self, data: Message | str) -> None:
         if not isinstance(data, str):

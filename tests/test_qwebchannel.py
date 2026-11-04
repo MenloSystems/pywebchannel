@@ -315,3 +315,62 @@ def test_repeated_destroyed_signal_is_ignored():
 
     # THEN: The object stays unregistered.
     assert "room1" not in channel.objects
+
+
+def test_disconnecting_from_destroyed_sends_no_disconnect_request():
+    """
+    @scenario Disconnecting the last callback of the destroyed signal
+    @given A callback connected to the destroyed signal, which sent no connect request
+    @when  The callback disconnects
+    @then  The server receives no disconnectFromSignal request either
+    """
+    # GIVEN: A callback is connected to the destroyed signal.
+    channel, transport = make_channel({"chatserver": CHATSERVER})
+    chatserver = channel.objects["chatserver"]
+    chatserver.destroyed.connect(print)
+
+    # WHEN: The callback disconnects.
+    chatserver.destroyed.disconnect(print)
+
+    # THEN: No disconnectFromSignal request was sent.
+    sent = [m["type"] for m in transport.messages]
+    assert MsgType.disconnectFromSignal not in sent
+
+
+def test_no_idle_is_sent_when_the_init_callback_closes_the_connection():
+    """
+    @scenario The init callback closes the connection
+    @given A channel whose init callback closes the connection
+    @when  The init response arrives
+    @then  The channel sends no idle message over the closed connection
+    """
+    # GIVEN: The init callback closes the connection.
+    transport = FakeTransport()
+    channel = QWebChannel(lambda channel: channel.connection_closed())
+    channel.connection_made(transport)
+
+    # WHEN: The init response arrives.
+    channel.message_received(
+        {"type": MsgType.response, "id": transport.messages[0]["id"], "data": {}}
+    )
+
+    # THEN: No idle message was sent.
+    assert MsgType.idle not in [m["type"] for m in transport.messages]
+
+
+def test_closing_the_connection_drops_pending_callbacks():
+    """
+    @scenario The connection closes while a method call is pending
+    @given A channel with a pending method call
+    @when  The connection closes
+    @then  The channel no longer holds the callback of the call
+    """
+    # GIVEN: A method call waits for its response.
+    channel, _ = make_channel({"chatserver": CHATSERVER})
+    channel.objects["chatserver"].login("bob", print)
+
+    # WHEN: The connection closes.
+    channel.connection_closed()
+
+    # THEN: The callback is gone.
+    assert not channel.execCallbacks
