@@ -294,3 +294,85 @@ def test_unawaited_channel_does_not_log_an_error_when_the_connection_closes():
 
     # THEN: The loop saw no unretrieved exception.
     assert errors == []
+
+
+def test_call_after_the_connection_closed_fails():
+    """
+    @scenario A method is called after the connection closed
+    @given An initialized channel whose connection closed
+    @when  A remote method is called
+    @then  Awaiting the call raises ConnectionError instead of hanging
+    """
+
+    async def main():
+        # GIVEN: The connection of an initialized channel closed.
+        transport = FakeTransport()
+        channel = QWebChannel()
+        init(channel, transport)
+        await channel
+        channel.connection_closed()
+
+        # WHEN: A remote method is called.
+        result = channel.objects["chatserver"].login("bob")
+
+        # THEN: The call fails.
+        with pytest.raises(ConnectionError):
+            await asyncio.wait_for(result, 1)
+
+    asyncio.run(main())
+
+
+def test_channel_can_be_awaited_after_a_reconnect():
+    """
+    @scenario The channel reconnects after the connection closed before init
+    @given A channel whose first connection closed before the initialization
+    @when  A new connection is made and initialized
+    @then  Awaiting the channel completes
+    """
+
+    async def main():
+        # GIVEN: The first connection closed before the initialization.
+        channel = QWebChannel()
+        channel.connection_made(FakeTransport())
+        channel.connection_closed()
+
+        # WHEN: A new connection initializes the channel.
+        init(channel, FakeTransport())
+
+        # THEN: Awaiting the channel completes.
+        await asyncio.wait_for(channel, 1)
+
+    asyncio.run(main())
+
+
+def test_unawaited_call_does_not_log_an_error_when_the_connection_closes():
+    """
+    @scenario Nobody waits for the result of a method call
+    @given A pending method call whose future is never awaited
+    @when  The connection closes
+    @then  No error reaches the exception handler of the loop
+    """
+    errors = []
+
+    async def main():
+        asyncio.get_running_loop().set_exception_handler(
+            lambda loop, context: errors.append(context)
+        )
+
+        # GIVEN: A method call that nobody awaits.
+        transport = FakeTransport()
+        channel = QWebChannel()
+        init(channel, transport)
+        await channel
+        channel.objects["chatserver"].sendMessage("hi")
+
+        # WHEN: The connection closes.
+        channel.connection_closed()
+        await asyncio.sleep(0)
+        del channel
+        gc.collect()
+
+    asyncio.run(main())
+
+    # THEN: The loop saw no unretrieved exception.
+    assert errors == []

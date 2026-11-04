@@ -39,8 +39,12 @@ class WebSocketTransport:
 
 
 async def read_messages(connection: ClientConnection, webchannel: QWebChannel) -> None:
-    async for message in connection:
-        webchannel.message_received(message)
+    try:
+        async for message in connection:
+            webchannel.message_received(message)
+    finally:
+        # Fail the pending calls, so that the chat does not wait forever
+        webchannel.connection_closed()
 
 
 def print_newmessage(time: str, user: str, message: str) -> None:
