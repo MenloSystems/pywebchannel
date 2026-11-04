@@ -322,32 +322,6 @@ def test_call_after_the_connection_closed_fails():
     asyncio.run(main())
 
 
-def test_closed_channel_stays_closed_after_a_new_connection():
-    """
-    @scenario Reconnecting is not supported
-    @given A channel whose connection closed before the initialization
-    @when  A new connection is made and initialized
-    @then  Awaiting the channel and calling methods still raise ConnectionError
-    """
-
-    async def main():
-        # GIVEN: The first connection closed before the initialization.
-        channel = QWebChannel()
-        channel.connection_made(FakeTransport())
-        channel.connection_closed()
-
-        # WHEN: A new connection initializes the channel.
-        init(channel, FakeTransport())
-
-        # THEN: The channel stays closed.
-        with pytest.raises(ConnectionError):
-            await asyncio.wait_for(channel, 1)
-        with pytest.raises(ConnectionError):
-            await asyncio.wait_for(channel.objects["chatserver"].login("bob"), 1)
-
-    asyncio.run(main())
-
-
 def test_unawaited_call_does_not_log_an_error_when_the_connection_closes():
     """
     @scenario Nobody waits for the result of a method call

@@ -134,9 +134,12 @@ class QObject:
         with contextlib.suppress(ValueError):
             signalName = int(signalName)
 
-        # iterate over a copy: a callback may disconnect itself
-        for callback in list(self._objectSignals.get(signalName, [])):
-            callback(*signalArgs)
+        callbacks = self._objectSignals.get(signalName, [])
+        # Iterate over a copy, as a callback may disconnect itself. Like Qt, skip
+        # callbacks that an earlier callback disconnected during this emission.
+        for callback in list(callbacks):
+            if callback in callbacks:
+                callback(*signalArgs)
 
     def _propertyUpdate(self, signals: Message, propertyMap: Message) -> None:
         # update property cache
@@ -194,10 +197,11 @@ class QObject:
         self._propertyCache[propertyIndex] = propertyValue
 
         if notifySignalData:
-            if notifySignalData[0] == 1:
+            signalName, signalIndex = notifySignalData
+            if signalName == 1:
                 # signal name is optimized away, reconstruct the actual name
-                notifySignalData[0] = propertyName + "Changed"
-            self._addSignal(notifySignalData, propertyName)
+                signalName = propertyName + "Changed"
+            self._addSignal([signalName, signalIndex], propertyName)
 
         def getter(self: QObject) -> Any:
             return self._propertyCache[propertyIndex]
@@ -206,8 +210,6 @@ class QObject:
             if value is None:
                 logger.warning("Property setter for %s called with 'None' value!", propertyName)
                 return
-
-            self._propertyCache[propertyIndex] = value
 
             valueToSend = value
             if isinstance(value, QObject) and value._id in self._webChannel.objects:
@@ -221,6 +223,8 @@ class QObject:
                     "value": valueToSend,
                 }
             )
+
+            self._propertyCache[propertyIndex] = value
 
         setattr(self.__class__, propertyName, property(getter, setter, doc="Property"))
 
@@ -273,9 +277,8 @@ class Signal:
             return
 
         callbacks = self._qObject._objectSignals.setdefault(self._signalIndex, [])
-        callbacks.append(callback)
 
-        if self._needsServerConnection() and len(callbacks) == 1:
+        if self._needsServerConnection() and not callbacks:
             # The server counts connections, so connect only once, like disconnect().
             self._qObject._webChannel.exec_(
                 {
@@ -284,6 +287,8 @@ class Signal:
                     "signal": self._signalIndex,
                 }
             )
+
+        callbacks.append(callback)
 
     def disconnect(self, callback: SignalCallback) -> None:
         if not callable(callback):
@@ -314,8 +319,11 @@ class QWebChannel:
     Feed incoming messages to :meth:`message_received` and call
     :meth:`connection_made` once the transport is ready.
 
-    A channel serves a single connection. Reconnecting is not supported, as the
-    objects of the old connection would not be updated, so use a new channel instead.
+    A channel serves a single connection. Once it closed, sending raises
+    ConnectionError. Reconnecting is not supported, as the objects of the old
+    connection would not be updated, so use a new channel instead.
+
+    A channel is not thread-safe. Use it from one thread only.
     """
 
     QObjectType: type[QObject] = QObject
@@ -323,6 +331,7 @@ class QWebChannel:
     def __init__(self, initCallback: Callable[[QWebChannel], None] | None = None) -> None:
         self.initCallback = initCallback
         self.__initialized = False
+        self.__closed = False
         self.objects: dict[str, QObject] = {}
         self.execCallbacks: dict[int, ResponseCallback] = {}
         self.execId = 0
@@ -333,7 +342,14 @@ class QWebChannel:
         if self.initCallback:
             self.initCallback(self)
 
+    @property
+    def closed(self) -> bool:
+        """Whether the connection of the channel closed."""
+        return self.__closed
+
     def connection_made(self, transport: Any) -> None:
+        if self.__closed:
+            raise RuntimeError("Reconnecting is not supported, use a new QWebChannel")
         self.transport = transport
 
         def callback(data: Message) -> None:
@@ -354,6 +370,7 @@ class QWebChannel:
 
     def connection_closed(self) -> None:
         self.__initialized = False
+        self.__closed = True
         # responses to pending requests cannot arrive any more
         self.execCallbacks.clear()
 
@@ -381,6 +398,9 @@ class QWebChannel:
             logger.warning("Invalid message received: %s", data)
 
     def exec_(self, data: Message, callback: ResponseCallback | None = None) -> None:
+        if self.__closed:
+            raise ConnectionError("The WebChannel connection was closed")
+
         if not callback:
             # if no callback is given, send directly
             self.send(data)
@@ -398,7 +418,11 @@ class QWebChannel:
         self.execId += 1
         self.execCallbacks[data["id"]] = callback
 
-        self.send(data)
+        try:
+            self.send(data)
+        except BaseException:
+            del self.execCallbacks[data["id"]]
+            raise
 
     def handleSignal(self, message: Message) -> None:
         qObject = self.objects.get(message["object"])
@@ -420,15 +444,18 @@ class QWebChannel:
         callback(message["data"])
 
     def handle_propertyUpdate(self, message: Message) -> None:
-        for data in message["data"]:
-            qObject = self.objects.get(data["object"])
-            if qObject is not None:
-                qObject._propertyUpdate(data["signals"], data["properties"])
-            else:
-                logger.warning("Unhandled property update for %s", data.get("object"))
-
-        if self.__initialized:
-            self.exec_({"type": QWebChannelMessageTypes.idle})
+        try:
+            for data in message["data"]:
+                qObject = self.objects.get(data["object"])
+                if qObject is not None:
+                    qObject._propertyUpdate(data["signals"], data["properties"])
+                else:
+                    logger.warning("Unhandled property update for %s", data.get("object"))
+        finally:
+            # The server sends further updates only after idle, so send it even if a
+            # callback raised. A callback may also have closed the connection.
+            if self.__initialized:
+                self.exec_({"type": QWebChannelMessageTypes.idle})
 
     def debug(self, message: Any) -> None:
-        self.send({"type": QWebChannelMessageTypes.debug, "data": message})
+        self.exec_({"type": QWebChannelMessageTypes.debug, "data": message})
