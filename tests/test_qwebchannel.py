@@ -265,3 +265,53 @@ def test_debug_message():
     channel.debug("hello")
 
     assert transport.last(MsgType.debug)["data"] == "hello"
+
+
+def test_second_connect_does_not_send_another_connect_request():
+    """
+    @scenario Connecting a second callback to a signal
+    @given A signal with one connected callback
+    @when  A second callback connects to the same signal
+    @then  The server receives only one connectToSignal request, so that one
+           disconnectFromSignal later releases the server-side connection
+    """
+    # GIVEN: The newMessage signal has one callback.
+    channel, transport = make_channel({"chatserver": CHATSERVER})
+    chatserver = channel.objects["chatserver"]
+    chatserver.newMessage.connect(print)
+
+    # WHEN: A second callback connects.
+    chatserver.newMessage.connect(repr)
+
+    # THEN: Only one connectToSignal request was sent.
+    sent = [m["type"] for m in transport.messages]
+    assert sent.count(MsgType.connectToSignal) == 1
+
+
+def test_repeated_destroyed_signal_is_ignored():
+    """
+    @scenario The server reports the destruction of an object twice
+    @given An unwrapped QObject that the destroyed signal already removed
+    @when  The destroyed signal arrives again for the same object
+    @then  The channel does not raise
+    """
+    # GIVEN: room1 is unwrapped and then destroyed.
+    channel, transport = make_channel({"chatserver": CHATSERVER})
+    channel.objects["chatserver"].login(print)
+    msg = transport.last(MsgType.invokeMethod)
+    channel.message_received(
+        {
+            "type": MsgType.response,
+            "id": msg["id"],
+            "data": {"__QObject*__": True, "id": "room1", "data": CHATSERVER},
+        }
+    )
+    room1 = channel.objects["room1"]
+    destroyed = {"type": MsgType.signal, "object": "room1", "signal": 6, "args": []}
+    channel.message_received(destroyed)
+
+    # WHEN: The destroyed signal is emitted again on the stale object.
+    room1._signalEmitted(6, [])
+
+    # THEN: The object stays unregistered.
+    assert "room1" not in channel.objects

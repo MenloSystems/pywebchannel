@@ -101,7 +101,7 @@ class QObject:
         qObject = self._webChannel.QObjectType(objectId, response["data"], self._webChannel)
 
         def destroyedFunction(*args: Any) -> None:
-            if self._webChannel.objects[objectId] is qObject:
+            if self._webChannel.objects.get(objectId) is qObject:
                 del self._webChannel.objects[objectId]
 
         qObject.destroyed.connect(destroyedFunction)
@@ -263,11 +263,17 @@ class Signal:
             logger.warning("Bad callback given to connect to signal %s", self._signalName)
             return
 
-        self._qObject._objectSignals.setdefault(self._signalIndex, []).append(callback)
+        callbacks = self._qObject._objectSignals.setdefault(self._signalIndex, [])
+        callbacks.append(callback)
 
-        if not self.isPropertyNotifySignal and self._signalName != "destroyed":
+        if (
+            not self.isPropertyNotifySignal
+            and self._signalName != "destroyed"
+            and len(callbacks) == 1
+        ):
             # only required for "pure" signals, handled separately for properties in
             # _propertyUpdate. Also note that we always get notified about the destroyed signal.
+            # The server counts connections, so connect only once, like disconnect().
             self._qObject._webChannel.exec_(
                 {
                     "type": QWebChannelMessageTypes.connectToSignal,
@@ -334,9 +340,7 @@ class QWebChannel:
                 qObject._unwrapProperties()
 
             self.initialized()
-
-            if self.__initialized:
-                self.exec_({"type": QWebChannelMessageTypes.idle})
+            self.exec_({"type": QWebChannelMessageTypes.idle})
 
         self.exec_({"type": QWebChannelMessageTypes.init}, callback)
 
