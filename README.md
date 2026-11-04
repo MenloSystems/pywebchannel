@@ -10,8 +10,11 @@ The library has no dependencies. It needs Python 3.10 or later.
 
 ## Installation
 
+The package is not on PyPI yet. (The `pywebchannel` project on PyPI is a different project.)
+Install it from Git:
+
 ```
-pip install pywebchannel
+pip install git+https://github.com/MenloSystems/pywebchannel
 ```
 
 ## Modules
@@ -50,7 +53,11 @@ asyncio.run(main())
 Use `dir(obj)` to see the interface of a remote object.
 
 A channel serves a single connection. Reconnecting is not supported, so create a new channel
-for a new connection.
+for a new connection. A channel is not thread-safe, so use it from one thread only.
+
+The asyncio channel takes its event loop from the running loop when it is awaited or when a remote
+method is called. Calling a remote method outside a running loop therefore raises `RuntimeError`,
+unless you pass the loop explicitly: `QWebChannel(loop=loop)`.
 
 `examples/chatclient.py` is a larger example. It connects to the `chatserver` example that comes
 with QtWebChannel:
