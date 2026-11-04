@@ -1,6 +1,9 @@
 /build/
 /dist/
-/pywebchannel.egg-info/
+*.egg-info/
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
 .spyderproject

@@ -2,11 +2,80 @@
 
 ## What is PyWebChannel?
 
-PyWebChannel is an implementation of [Qt's WebChannel](https://doc.qt.io/qt-5/qtwebchannel-index.html) protocol in Python.
+PyWebChannel is an implementation of [Qt's WebChannel](https://doc.qt.io/qt-6/qtwebchannel-index.html)
+protocol in pure Python. It lets Python code use the objects, properties, signals and methods that a
+Qt application publishes through `QWebChannel`.
 
-From Python 3.4 onwards, this module has no dependencies. In Python < 3.4 you need the backport [`enum34`](https://pypi.org/project/enum34/) package.
-The `pywebchannel.asynchronous` submodule provides an `asyncio` compatibility layer (Python 3.5+).
+The library has no dependencies. It needs Python 3.10 or later.
 
-A simple, newline-delimited raw TCP/IP Transport and Protocol for use with `asyncio` is provided in `pywebchannel.asyncio`.
+## Installation
 
-For an example, see the `examples/chatclient.py`. It connects to and interacts with the `chatserver` example included in QtWebChannel.
+The package is not on PyPI yet. (The `pywebchannel` project on PyPI is a different project.)
+Install it from Git:
+
+```
+pip install git+https://github.com/MenloSystems/pywebchannel
+```
+
+## Modules
+
+* `pywebchannel` — the transport-agnostic protocol implementation. Give the channel a transport that
+  has a `send()` method, and pass each received message to `QWebChannel.message_received()`.
+* `pywebchannel.asynchronous` — an `asyncio` layer. Remote methods return awaitables, and you can
+  await the channel itself to wait for the initialization. `QWebChannelProtocol` is an
+  `asyncio.Protocol` for streaming transports with newline-delimited messages.
+
+## Example
+
+```python
+import asyncio
+
+from pywebchannel.asynchronous import QWebChannelProtocol
+
+
+async def main():
+    loop = asyncio.get_running_loop()
+    _, channel = await loop.create_connection(QWebChannelProtocol, "localhost", 12345)
+
+    # Wait until the remote objects are available
+    await channel
+
+    obj = channel.objects["myObject"]
+
+    obj.mySignal.connect(print)  # signals take callbacks
+    obj.myProperty = 42  # properties behave like attributes
+    print(await obj.myMethod("a"))  # methods return awaitables
+
+
+asyncio.run(main())
+```
+
+Use `dir(obj)` to see the interface of a remote object.
+
+A channel serves a single connection. Reconnecting is not supported, so create a new channel
+for a new connection. A channel is not thread-safe, so use it from one thread only.
+
+The asyncio channel takes its event loop from the running loop when it is awaited or when a remote
+method is called. Calling a remote method outside a running loop therefore raises `RuntimeError`,
+unless you pass the loop explicitly: `QWebChannel(loop=loop)`.
+
+`examples/chatclient.py` is a larger example. It connects to the `chatserver` example that comes
+with QtWebChannel:
+
+```
+pip install -e ".[examples]"
+python examples/chatclient.py
+```
+
+## Development
+
+```
+pip install -e . pytest ruff
+pytest
+ruff check .
+ruff format .
+```
+
+## License
+
+PyWebChannel is dual-licensed: LGPL-3.0-only OR GPL-2.0-or-later.
