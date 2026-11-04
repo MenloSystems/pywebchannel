@@ -16,6 +16,7 @@ from typing import Any
 
 from aioconsole import ainput
 from websockets.asyncio.client import ClientConnection, connect
+from websockets.exceptions import ConnectionClosed
 
 from pywebchannel.asynchronous import QWebChannel
 
@@ -35,7 +36,14 @@ class WebSocketTransport:
     def send(self, data: str) -> None:
         task = asyncio.create_task(self._connection.send(data))
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(self._sent)
+
+    def _sent(self, task: asyncio.Task[None]) -> None:
+        self._tasks.discard(task)
+        # A closed connection ends the chat in main(), so ignore it here
+        if not task.cancelled():
+            with contextlib.suppress(ConnectionClosed):
+                task.result()
 
 
 async def read_messages(connection: ClientConnection, webchannel: QWebChannel) -> None:
@@ -101,13 +109,19 @@ async def main() -> None:
         webchannel = QWebChannel()
         webchannel.connection_made(WebSocketTransport(connection))
 
+        # Chat until the user quits or the server closes the connection
         reader = asyncio.create_task(read_messages(connection, webchannel))
-        try:
-            await chat(webchannel)
-        finally:
-            reader.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await reader
+        chatter = asyncio.create_task(chat(webchannel))
+        done, pending = await asyncio.wait({reader, chatter}, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+
+        # Raise unexpected errors, e.g. EOFError when the user quits
+        with contextlib.suppress(ConnectionClosed, ConnectionError):
+            for task in done:
+                task.result()
+        print("The server closed the connection.")
 
 
 if __name__ == "__main__":
