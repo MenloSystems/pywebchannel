@@ -376,3 +376,87 @@ def test_unawaited_call_does_not_log_an_error_when_the_connection_closes():
 
     # THEN: The loop saw no unretrieved exception.
     assert errors == []
+
+
+class InitCallbackError(Exception):
+    pass
+
+
+def failing_init_callback(channel):
+    raise InitCallbackError
+
+
+def test_awaiting_fails_when_the_init_callback_raises():
+    """
+    @scenario The init callback raises
+    @given A channel whose init callback raises
+    @when  The init response arrives
+    @then  Awaiting the channel raises the error instead of hanging
+    """
+
+    async def main():
+        # GIVEN: The init callback raises.
+        channel = QWebChannel(failing_init_callback)
+        awaiting = asyncio.ensure_future(asyncio.wait_for(channel, 1))
+        await asyncio.sleep(0)
+
+        # WHEN: The init response arrives.
+        with pytest.raises(InitCallbackError):
+            init(channel, FakeTransport())
+
+        # THEN: Awaiting the channel raises the error of the callback.
+        with pytest.raises(InitCallbackError):
+            await awaiting
+
+    asyncio.run(main())
+
+
+def test_pending_calls_get_distinct_errors_when_the_connection_closes():
+    """
+    @scenario Several method calls are pending when the connection closes
+    @given An initialized channel with two pending method calls
+    @when  The connection closes
+    @then  Each call fails with its own ConnectionError instance
+    """
+
+    async def main():
+        # GIVEN: Two method calls wait for their responses.
+        channel = QWebChannel()
+        init(channel, FakeTransport())
+        await channel
+        first = channel.objects["chatserver"].login("alice")
+        second = channel.objects["chatserver"].login("bob")
+
+        # WHEN: The connection closes.
+        channel.connection_closed()
+        await asyncio.sleep(0)
+
+        # THEN: The errors are not shared.
+        assert first.exception() is not second.exception()
+
+    asyncio.run(main())
+
+
+def test_closing_after_the_loop_closed_does_not_raise():
+    """
+    @scenario The connection closes after the loop of a pending call closed
+    @given A pending method call whose loop has closed
+    @when  The connection closes
+    @then  connection_closed() does not raise
+    """
+
+    # GIVEN: A method call is pending when its loop ends.
+    channel = QWebChannel()
+
+    async def main():
+        init(channel, FakeTransport())
+        await channel
+        return channel.objects["chatserver"].login("bob")
+
+    pending = asyncio.run(main())
+
+    # WHEN: The connection closes.
+    channel.connection_closed()
+
+    # THEN: The future stays pending, as its loop cannot run any more.
+    assert not pending.done()

@@ -12,6 +12,7 @@ CHATSERVER = {
     "signals": [["newMessage", 5], ["destroyed", 6]],
     "enums": {"Color": {"Red": 1, "Green": 2}},
 }
+DESTROYED_INDEX = dict(CHATSERVER["signals"])["destroyed"]
 
 
 class FakeTransport:
@@ -201,7 +202,9 @@ def test_destroyed_signal_unregisters_the_object():
         }
     )
 
-    channel.message_received({"type": MsgType.signal, "object": "room1", "signal": 6, "args": []})
+    channel.message_received(
+        {"type": MsgType.signal, "object": "room1", "signal": DESTROYED_INDEX, "args": []}
+    )
 
     assert "room1" not in channel.objects
 
@@ -307,11 +310,11 @@ def test_repeated_destroyed_signal_is_ignored():
         }
     )
     room1 = channel.objects["room1"]
-    destroyed = {"type": MsgType.signal, "object": "room1", "signal": 6, "args": []}
+    destroyed = {"type": MsgType.signal, "object": "room1", "signal": DESTROYED_INDEX, "args": []}
     channel.message_received(destroyed)
 
     # WHEN: The destroyed signal is emitted again on the stale object.
-    room1._signalEmitted(6, [])
+    room1._signalEmitted(DESTROYED_INDEX, [])
 
     # THEN: The object stays unregistered.
     assert "room1" not in channel.objects
