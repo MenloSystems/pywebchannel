@@ -7,7 +7,10 @@ import pytest
 from pywebchannel import QWebChannelMessageTypes as MsgType
 from pywebchannel.asynchronous import QWebChannel, QWebChannelProtocol
 
-from .test_qwebchannel import CHATSERVER, FakeTransport
+from .test_qwebchannel import CHATSERVER, NEW_MESSAGE_INDEX, FailingTransport, FakeTransport
+
+# Short enough to time out before a response that is sent later
+SHORT_TIMEOUT = 0.01
 
 
 class FakeStreamTransport:
@@ -19,6 +22,27 @@ class FakeStreamTransport:
 
     def messages(self):
         return [json.loads(line) for line in self.data.splitlines()]
+
+
+def encode_response(requestId, data=None):
+    message = {
+        "type": MsgType.response,
+        "id": requestId,
+        "data": data or {"chatserver": CHATSERVER},
+    }
+    return json.dumps(message).encode()
+
+
+def encode_signal(signalIndex, *args):
+    message = {"type": MsgType.signal, "object": "chatserver", "signal": signalIndex, "args": args}
+    return json.dumps(message).encode()
+
+
+@pytest.fixture
+def loop():
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
 
 def init(channel, transport):
@@ -113,31 +137,30 @@ def test_methods_keep_the_isqtmethod_marker():
 
 
 def test_protocol_splits_newline_delimited_messages():
+    """
+    @scenario Messages arrive in arbitrary chunks
+    @given A protocol channel whose init callback connects to a signal
+    @when  The init response arrives in two chunks, the second also holding a signal
+    @then  The channel initializes and the signal reaches the callback
+    """
+
     async def main():
-        transport = FakeStreamTransport()
-        channel = QWebChannelProtocol()
-        channel.connection_made(transport)
-
-        init_id = transport.messages()[0]["id"]
-        response = json.dumps(
-            {"type": MsgType.response, "id": init_id, "data": {"chatserver": CHATSERVER}}
-        ).encode()
-
-        # Feed the response in two chunks, plus a signal in the same chunk as the newline
-        channel.data_received(response[:10])
-        channel.data_received(response[10:] + b"\n")
-
-        await channel
-
+        # GIVEN: The init callback connects to newMessage.
         seen = []
-        channel.objects["chatserver"].newMessage.connect(lambda *args: seen.append(args))
-        channel.data_received(
-            json.dumps(
-                {"type": MsgType.signal, "object": "chatserver", "signal": 5, "args": ["hi"]}
-            ).encode()
-            + b"\n"
+        transport = FakeStreamTransport()
+        channel = QWebChannelProtocol(
+            lambda ch: ch.objects["chatserver"].newMessage.connect(lambda *args: seen.append(args))
         )
+        channel.connection_made(transport)
+        response = encode_response(transport.messages()[0]["id"])
+        signal = encode_signal(NEW_MESSAGE_INDEX, "hi")
 
+        # WHEN: The response is split, and the signal follows in the same chunk.
+        channel.data_received(response[:10])
+        channel.data_received(response[10:] + b"\n" + signal + b"\n")
+
+        # THEN: The channel is initialized and the signal was delivered.
+        await asyncio.wait_for(channel, 1)
         assert seen == [("hi",)]
         assert MsgType.idle in [m["type"] for m in transport.messages()]
 
@@ -437,3 +460,98 @@ def test_closing_after_the_loop_closed_does_not_raise():
 
     # THEN: The future stays pending, as its loop cannot run any more.
     assert not pending.done()
+
+
+def test_cancelled_await_does_not_affect_later_awaits():
+    """
+    @scenario An await of the channel times out before the initialization
+    @given A channel whose first await was cancelled by a timeout
+    @when  The init response arrives
+    @then  A later await of the channel completes
+    """
+
+    async def main():
+        # GIVEN: The first await timed out.
+        transport = FakeTransport()
+        channel = QWebChannel()
+        channel.connection_made(transport)
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(channel, SHORT_TIMEOUT)
+
+        # WHEN: The init response arrives.
+        channel.message_received(encode_response(transport.messages[0]["id"]))
+
+        # THEN: Awaiting the channel again completes.
+        await asyncio.wait_for(channel, 1)
+
+    asyncio.run(main())
+
+
+def test_failed_send_keeps_no_pending_future():
+    """
+    @scenario Sending a call fails
+    @given An initialized channel whose transport cannot send
+    @when  A remote method is called
+    @then  The error propagates and no future is kept as pending
+    """
+
+    async def main():
+        # GIVEN: The transport fails from now on.
+        channel = QWebChannel()
+        init(channel, FakeTransport())
+        await channel
+        channel.transport = FailingTransport()
+
+        # WHEN: A method is called.
+        with pytest.raises(OSError):
+            channel.objects["chatserver"].login("bob")
+
+        # THEN: No future waits for a response.
+        assert channel._pendingFutures == set()
+
+    asyncio.run(main())
+
+
+def test_explicit_loop_allows_calls_outside_a_running_loop(loop):
+    """
+    @scenario The channel is used before its loop runs
+    @given A channel created and initialized with an explicit loop that does not run
+    @when  A remote method is called and answered outside the loop
+    @then  The loop can await the result
+    """
+    # GIVEN: The channel uses an explicit loop.
+    transport = FakeTransport()
+    channel = QWebChannel(loop=loop)
+    init(channel, transport)
+
+    # WHEN: A method is called and answered without a running loop.
+    result = channel.objects["chatserver"].login("bob")
+    msg = transport.last(MsgType.invokeMethod)
+    channel.message_received({"type": MsgType.response, "id": msg["id"], "data": True})
+
+    # THEN: The loop gets the result.
+    assert loop.run_until_complete(asyncio.wait_for(result, 1)) is True
+
+
+def test_protocol_skips_empty_messages():
+    """
+    @scenario The stream holds empty lines
+    @given A protocol channel waiting for the init response
+    @when  Empty lines arrive before and after the response
+    @then  The channel initializes
+    """
+
+    async def main():
+        # GIVEN: The channel waits for the init response.
+        transport = FakeStreamTransport()
+        channel = QWebChannelProtocol()
+        channel.connection_made(transport)
+        response = encode_response(transport.messages()[0]["id"])
+
+        # WHEN: The response is surrounded by empty lines.
+        channel.data_received(b"\n\n" + response + b"\n\n")
+
+        # THEN: The channel is initialized.
+        await asyncio.wait_for(channel, 1)
+
+    asyncio.run(main())
